@@ -54,6 +54,14 @@ browser_windows = []
 local_proxy_thread = None
 proxy_server_running = False
 
+# Tab tracking system
+active_tabs = {}  # {tab_id: {'driver': driver, 'number': number, 'last_activity': time, 'status': 'active/idle/working'}}
+tab_counter = 0
+tab_lock = threading.Lock()
+stats_lock = threading.Lock()  # Thread-safe statistics updates
+IDLE_TIMEOUT = 60  # Seconds of inactivity before considering tab idle
+GLOBAL_IDLE_CHECK_INTERVAL = 5  # Check all tabs every 5 seconds
+
 # =====================================================
 # 🌐 EMBEDDED FLUXY PROXY (Auto-Start Integrated)
 # =====================================================
@@ -278,16 +286,23 @@ def check_proxy_ip():
 # =====================================================
 
 def human_type(element, text, min_delay=0.03, max_delay=0.1):
+    """Paste number like a human using copy-paste behavior"""
     try:
         element.clear()
     except:
         pass
-    for ch in text:
-        try:
-            element.send_keys(ch)
-        except:
-            pass
-        time.sleep(random.uniform(min_delay, max_delay))
+    
+    # Small delay before pasting (human-like)
+    time.sleep(random.uniform(0.2, 0.4))
+    
+    try:
+        # Paste entire text at once (like Ctrl+V)
+        element.send_keys(text)
+    except:
+        pass
+    
+    # Small delay after pasting (human-like)
+    time.sleep(random.uniform(0.3, 0.5))
 
 def find_input(driver):
     try:
@@ -305,26 +320,57 @@ def find_input(driver):
 def find_search_button(driver):
     # Multilingual button text support
     texts = [
-        "Search", "Continue", "Find", "Next",  # English
-        "খুঁজুন", "চালিয়ে যান", "পরবর্তী",  # Bengali
-        "खोजें", "जारी रखें", "अगला",  # Hindi
-        "بحث", "متابعة", "التالي",  # Arabic
-        "Buscar", "Continuar", "Siguiente",  # Spanish
-        "Rechercher", "Continuer", "Suivant",  # French
-        "Suchen", "Weiter", "Nächste",  # German
-        "Pesquisar", "Continuar", "Próximo",  # Portuguese
-        "Cari", "Lanjutkan", "Berikutnya",  # Indonesian
-        "搜索", "继续", "下一步"  # Chinese
+        "Search", "Continue", "Find", "Next", "Confirm",  # English
+        "খুঁজুন", "চালিয়ে যান", "পরবর্তী", "নিশ্চিত করুন",  # Bengali
+        "खोजें", "जारी रखें", "अगला", "पुष्टि करें",  # Hindi
+        "بحث", "متابعة", "التالي", "تأكيد",  # Arabic
+        "Buscar", "Continuar", "Siguiente", "Confirmar",  # Spanish
+        "Rechercher", "Continuer", "Suivant", "Confirmer",  # French
+        "Suchen", "Weiter", "Nächste", "Bestätigen",  # German
+        "Pesquisar", "Continuar", "Próximo", "Confirmar",  # Portuguese
+        "Cari", "Lanjutkan", "Berikutnya", "Konfirmasi",  # Indonesian
+        "搜索", "继续", "下一步", "确认"  # Chinese
     ]
+    
+    # Method 1: Try exact text match
     for t in texts:
         try:
-            el = WebDriverWait(driver, 3).until(
+            el = WebDriverWait(driver, 2).until(
                 EC.element_to_be_clickable((By.XPATH, f'//button[contains(text(),"{t}")]'))
             )
             if el.is_displayed():
                 return el
         except:
             pass
+    
+    # Method 2: Try case-insensitive and partial match
+    for t in texts:
+        try:
+            xpath = f'//button[contains(translate(., "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "{t.lower()}")]'
+            el = driver.find_element(By.XPATH, xpath)
+            if el.is_displayed() and el.is_enabled():
+                return el
+        except:
+            pass
+    
+    # Method 3: Try any visible button with type="submit"
+    try:
+        buttons = driver.find_elements(By.XPATH, '//button[@type="submit"]')
+        for btn in buttons:
+            if btn.is_displayed() and btn.is_enabled():
+                return btn
+    except:
+        pass
+    
+    # Method 4: Try any visible button in the form
+    try:
+        buttons = driver.find_elements(By.XPATH, '//form//button')
+        for btn in buttons:
+            if btn.is_displayed() and btn.is_enabled():
+                return btn
+    except:
+        pass
+    
     return None
 
 def check_send_sms(driver):
@@ -377,18 +423,149 @@ def find_send_button(driver):
     return None
 
 def log_message(log_text, message):
-    """Helper function to safely insert text into CTkTextbox"""
-    log_text.configure(state="normal")
-    log_text.insert("end", message)
-    log_text.see("end")
-    log_text.configure(state="disabled")
-    log_text.update()
+    """Helper function to safely insert text into CTkTextbox with real-time updates"""
+    try:
+        log_text.configure(state="normal")
+        log_text.insert("end", message)
+        log_text.see("end")
+        log_text.configure(state="disabled")
+        # Force immediate UI update for real-time display
+        log_text.update_idletasks()
+        log_text.update()
+    except:
+        pass
+
+def register_tab(driver, number):
+    """Register a new tab and return its unique ID"""
+    global tab_counter, active_tabs
+    with tab_lock:
+        tab_counter += 1
+        tab_id = tab_counter
+        active_tabs[tab_id] = {
+            'driver': driver,
+            'number': number,
+            'last_activity': time.time(),
+            'status': 'working',
+            'start_time': time.time()
+        }
+    return tab_id
+
+def update_tab_activity(tab_id, status='working'):
+    """Update tab's last activity time and status"""
+    global active_tabs
+    with tab_lock:
+        if tab_id in active_tabs:
+            active_tabs[tab_id]['last_activity'] = time.time()
+            active_tabs[tab_id]['status'] = status
+
+def unregister_tab(tab_id):
+    """Remove tab from tracking"""
+    global active_tabs
+    with tab_lock:
+        if tab_id in active_tabs:
+            del active_tabs[tab_id]
+
+def get_tab_info():
+    """Get current tab statistics"""
+    with tab_lock:
+        total = len(active_tabs)
+        working = sum(1 for t in active_tabs.values() if t['status'] == 'working')
+        idle = sum(1 for t in active_tabs.values() if t['status'] == 'idle')
+        return total, working, idle
+
+def check_and_close_idle_tabs(log_text):
+    """Check all tabs for idle timeout and close them"""
+    global active_tabs, running
+    current_time = time.time()
+    tabs_to_close = []
+    
+    with tab_lock:
+        for tab_id, tab_info in list(active_tabs.items()):
+            total_lifetime = current_time - tab_info['start_time']
+            idle_time = current_time - tab_info['last_activity']
+            
+            # Close tab if:
+            # 1. Total lifetime exceeds 60 seconds (regardless of status)
+            # 2. OR tab is idle/stopped for more than IDLE_TIMEOUT seconds
+            if total_lifetime > 60:
+                tabs_to_close.append((tab_id, tab_info, total_lifetime, 'lifetime'))
+            elif tab_info['status'] != 'working' and idle_time > IDLE_TIMEOUT:
+                tabs_to_close.append((tab_id, tab_info, idle_time, 'idle'))
+    
+    # Close tabs
+    for tab_id, tab_info, duration, reason in tabs_to_close:
+        try:
+            if reason == 'lifetime':
+                log_message(log_text, f"🆔 Tab #{tab_id} ({tab_info['number']}): ⏱️ Lifetime exceeded ({int(duration)}s) - force closing\n")
+            else:
+                log_message(log_text, f"🆔 Tab #{tab_id} ({tab_info['number']}): ⏱️ Idle for {int(duration)}s - closing\n")
+            tab_info['driver'].quit()
+            unregister_tab(tab_id)
+        except:
+            pass
+    
+    return len(tabs_to_close)
+
+def close_all_idle_tabs(log_text):
+    """Close all tabs that are not actively working"""
+    global active_tabs
+    closed_count = 0
+    
+    with tab_lock:
+        tabs_to_close = [(tid, info) for tid, info in list(active_tabs.items()) if info['status'] != 'working']
+    
+    for tab_id, tab_info in tabs_to_close:
+        try:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({tab_info['number']}): 🛑 Closing idle/stuck tab\n")
+            tab_info['driver'].quit()
+            unregister_tab(tab_id)
+            closed_count += 1
+        except:
+            pass
+    
+    return closed_count
 
 def handle_window(driver, number, log_text, stats, using_proxy=False):
     global running
+    
+    # Register this tab and get unique ID
+    tab_id = register_tab(driver, number)
+    log_message(log_text, f"🆔 Tab #{tab_id} created for {number}\n")
+    
+    # Maximum execution time for entire operation
+    MAX_EXECUTION_TIME = 120  # 2 minutes total per number
+    start_time = time.time()
+    
+    def update_activity(status='working'):
+        """Update this tab's activity"""
+        update_tab_activity(tab_id, status)
+    
+    def check_timeout(operation_name=""):
+        """Check if maximum execution time exceeded"""
+        elapsed = time.time() - start_time
+        if elapsed > MAX_EXECUTION_TIME:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout after {int(elapsed)}s at {operation_name} - closing tab\n")
+            update_activity('stopped')
+            with stats_lock:
+                stats["checked"] += 1
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
+            return True
+        return False
+    
     try:
+        update_activity('working')
         if not running:
-            log_message(log_text, f"{number}: ⛔ Aborted before start\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Aborted before start\n")
+            update_activity('stopped')
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
             return
         
         # Increase timeouts for proxy connections
@@ -399,37 +576,27 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             driver.set_page_load_timeout(30)
             driver.implicitly_wait(10)
         
+        # Skip proxy test - go directly to Facebook
         if using_proxy:
-            # Test proxy connection with retries
-            proxy_ok = False
-            for attempt in range(3):
-                try:
-                    log_message(log_text, f"{number}: 🔄 Testing proxy connection (attempt {attempt+1}/3)...\n")
-                    driver.get("https://api.ipify.org")
-                    time.sleep(2)
-                    
-                    page_source = driver.page_source
-                    import re
-                    ip_match = re.search(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', page_source)
-                    if ip_match:
-                        proxy_ip = ip_match.group(0)
-                        log_message(log_text, f"{number}: ✅ Proxy connected! IP: {proxy_ip}\n")
-                        proxy_ok = True
-                        break
-                except Exception as e:
-                    log_message(log_text, f"{number}: ⚠️ Attempt {attempt+1} failed: {str(e)[:40]}\n")
-                    if attempt < 2:
-                        time.sleep(2)
-            
-            if not proxy_ok:
-                log_message(log_text, f"{number}: ❌ Proxy connection failed after 3 attempts, skipping...\n")
-                stats["checked"] += 1
-                return
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🌐 Using proxy - loading Facebook directly...\n")
+            update_activity('working')
         
-        log_message(log_text, f"{number}: 🔵 Loading Facebook recovery page...\n")
+        # Check timeout before loading Facebook
+        if check_timeout("Facebook page load start"):
+            stats["checked"] += 1
+            return
+        
+        update_activity('working')
+        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔵 Loading Facebook recovery page...\n")
         
         if not running:
-            log_message(log_text, f"{number}: ⛔ Stopped before loading\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped before loading\n")
+            update_activity('stopped')
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
             return
         
         # Load Facebook with retry on timeout
@@ -438,41 +605,99 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             try:
                 driver.get(URL)
                 time.sleep(random.uniform(2, 3))
+                update_activity('working')
                 break
             except Exception as e:
                 if retry < max_retries - 1:
-                    log_message(log_text, f"{number}: ⚠️ Page load timeout, retrying...\n")
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Page load timeout, retrying...\n")
                     time.sleep(2)
                 else:
-                    log_message(log_text, f"{number}: ❌ Failed to load Facebook page: {str(e)[:50]}\n")
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Failed to load Facebook page: {str(e)[:50]}\n")
+                    update_activity('idle')
                     stats["checked"] += 1
                     return
+            
+            # Check timeout between retries
+            if check_timeout(f"Facebook load retry {retry+1}"):
+                stats["checked"] += 1
+                return
         
         if not running:
-            log_message(log_text, f"{number}: ⛔ Stopped during load\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped during load\n")
+            update_activity('stopped')
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
             return
 
+        # Check timeout before finding input
+        if check_timeout("finding input box"):
+            with stats_lock:
+                stats["checked"] += 1
+            return
+
+        update_activity('working')
         input_el = find_input(driver)
         if not input_el:
-            log_message(log_text, f"{number}: ❌ Input box not found\n")
-            time.sleep(5)
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Input box not found - closing tab\n")
+            update_activity('stopped')
+            with stats_lock:
+                stats["checked"] += 1
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
             return
 
         input_el.click()
         human_type(input_el, number)
+        update_activity('working')
         time.sleep(0.6)
 
+        # Check timeout before clicking search
+        if check_timeout("clicking search button"):
+            with stats_lock:
+                stats["checked"] += 1
+            return
+
+        update_activity('working')
         btn = find_search_button(driver)
         if btn:
-            btn.click()
+            try:
+                # Try normal click first
+                btn.click()
+            except:
+                try:
+                    # Fallback to JavaScript click
+                    driver.execute_script("arguments[0].click();", btn)
+                except:
+                    # Last resort: press Enter
+                    input_el.send_keys(Keys.ENTER)
         else:
+            # No button found, press Enter
             input_el.send_keys(Keys.ENTER)
 
         time.sleep(3)
+        update_activity('working')
+
+        # Check timeout after search
+        if check_timeout("after search click"):
+            with stats_lock:
+                stats["checked"] += 1
+            return
 
         # Check for "No search result" or similar messages
         if not running:
-            log_message(log_text, f"{number}: ⛔ Stopped after search\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after search\n")
+            update_activity('stopped')
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
             return
         
         try:
@@ -495,51 +720,130 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             
             for indicator in no_result_indicators:
                 if indicator in page_text:
-                    log_message(log_text, f"{number}: ❌ No account found - closing immediately\n")
-                    stats["checked"] += 1
-                    stats["no_account"] += 1
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ No account found - closing tab\n")
+                    update_activity('stopped')
+                    with stats_lock:
+                        stats["checked"] += 1
+                        stats["no_account"] += 1
                     try:
                         driver.quit()
+                        unregister_tab(tab_id)
                     except:
                         pass
                     return
         except Exception as e:
-            log_message(log_text, f"{number}: ⚠️ Could not check for no-result: {str(e)[:40]}\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not check for no-result: {str(e)[:40]}\n")
 
+        # Check timeout before SMS check
+        if check_timeout("SMS option check"):
+            with stats_lock:
+                stats["checked"] += 1
+            return
+        
+        # Check if stopped
+        if not running:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped before SMS check\n")
+            update_activity('stopped')
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
+            return
+
+        update_activity('working')
         sms_option = check_send_sms(driver)
         if sms_option:
             driver.execute_script("arguments[0].click();", sms_option)
-            log_message(log_text, f"{number}: 🔹 SMS option selected\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔹 SMS option selected\n")
+            update_activity('working')
             time.sleep(1.5)
 
+            # Check timeout before send button
+            if check_timeout("finding send button"):
+                with stats_lock:
+                    stats["checked"] += 1
+                return
+
+            update_activity('working')
             send_btn = find_send_button(driver)
             if send_btn:
-                log_message(log_text, f"{number}: 🟢 Sending SMS...\n")
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🟢 Sending SMS...\n")
                 driver.execute_script("arguments[0].click();", send_btn)
+                update_activity('working')
                 time.sleep(15)
                 success_numbers.append(number)
-                stats["otp_sent"] += 1
-                log_message(log_text, f"{number}: ✅ SMS sent successfully!\n")
+                with stats_lock:
+                    stats["otp_sent"] += 1
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS sent successfully!\n")
+                update_activity('working')
             else:
-                log_message(log_text, f"{number}: ⚠ SMS option found but no Send button\n")
-                time.sleep(2)
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠ SMS option found but no Send button - closing tab\n")
+                update_activity('stopped')
+                with stats_lock:
+                    stats["checked"] += 1
+                try:
+                    driver.quit()
+                    unregister_tab(tab_id)
+                except:
+                    pass
         else:
-            log_message(log_text, f"{number}: ❌ No SMS option found\n")
-            time.sleep(2)
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ No SMS option found - closing tab\n")
+            update_activity('stopped')
+            with stats_lock:
+                stats["checked"] += 1
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
 
     except Exception as e:
-        log_message(log_text, f"{number}: ❌ Error: {str(e)[:100]}\n")
-    finally:
-        if not running:
-            log_message(log_text, f"{number}: 🛑 Stopped - closing\n")
-        else:
-            log_message(log_text, f"{number}: ✅ Completed\n")
-        
+        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error: {str(e)[:100]} - closing tab\n")
+        update_activity('stopped')
+        with stats_lock:
+            stats["checked"] += 1
         try:
             driver.quit()
+            unregister_tab(tab_id)
         except:
             pass
-        stats["checked"] += 1
+        return
+    finally:
+        # Calculate total execution time
+        total_time = time.time() - start_time
+        
+        # Only close browser in these cases:
+        # 1. User manually stopped (not running)
+        # 2. OTP was successfully sent
+        should_close = False
+        
+        if not running:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🛑 Stopped by user - closing tab\n")
+            update_activity('stopped')
+            should_close = True
+        elif number in success_numbers:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ OTP sent successfully - closing tab in {int(total_time)}s\n")
+            update_activity('working')
+            should_close = True
+        elif total_time > MAX_EXECUTION_TIME:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout after {int(total_time)}s - closing tab\n")
+            update_activity('stopped')
+            if number not in success_numbers:  # Only count if not already counted
+                stats["checked"] += 1
+            should_close = True
+        else:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Issue detected - closing tab\n")
+            update_activity('stopped')
+            should_close = True
+        
+        # Only quit driver if should_close is True
+        if should_close:
+            try:
+                driver.quit()
+                unregister_tab(tab_id)  # Remove from tracking when closed
+            except:
+                pass
 
 def open_browser_instance(index, number, log_text, stats, proxy_config=None):
     using_proxy = False
@@ -579,7 +883,8 @@ def open_browser_instance(index, number, log_text, stats, proxy_config=None):
             
     except Exception as e:
         log_message(log_text, f"{number}: ❌ Chrome failed: {str(e)[:100]}\n")
-        stats["checked"] += 1
+        with stats_lock:
+            stats["checked"] += 1
         return
     
     if hidden_mode and WINDOW_CONTROL_AVAILABLE:
@@ -592,6 +897,27 @@ def open_browser_instance(index, number, log_text, stats, proxy_config=None):
     
     handle_window(driver, number, log_text, stats, using_proxy)
 
+def global_idle_checker(log_text, stats_labels):
+    """Background thread that checks and closes idle tabs every 10 seconds"""
+    while running:
+        try:
+            time.sleep(GLOBAL_IDLE_CHECK_INTERVAL)
+            if not running:
+                break
+            
+            # Check and close idle tabs
+            closed_count = check_and_close_idle_tabs(log_text)
+            if closed_count > 0:
+                log_message(log_text, f"🧹 Global checker closed {closed_count} idle tabs\n")
+            
+            # Update tab statistics
+            total_tabs, working_tabs, idle_tabs = get_tab_info()
+            if stats_labels and "active_tabs" in stats_labels:
+                stats_labels["active_tabs"].configure(text=f"{total_tabs} ({working_tabs}W/{idle_tabs}I)")
+        except Exception as e:
+            # Silently continue on errors
+            pass
+
 def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_var, proxy_enabled_var=None, proxy_var=None, stop_btn=None, start_btn=None, ip_label=None):
     global running
     if running:
@@ -603,6 +929,11 @@ def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_v
         stop_btn.configure(state="normal")
     if start_btn:
         start_btn.configure(state="disabled")
+    
+    # Start global idle checker thread
+    idle_checker_thread = threading.Thread(target=global_idle_checker, args=(log_text, stats_labels), daemon=True)
+    idle_checker_thread.start()
+    log_message(log_text, f"🔍 Global tab monitor started (1-min timeout per tab, checks every {GLOBAL_IDLE_CHECK_INTERVAL}s)\n")
     
     proxy_enabled = proxy_enabled_var.get() if proxy_enabled_var else False
     proxy_address = proxy_var.get().strip() if proxy_var else None
@@ -672,15 +1003,24 @@ def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_v
             t.join()
         i += concurrency
 
-        update_stats(stats_labels, stats["checked"], total, stats["otp_sent"], stats["no_account"])
-        progress.set((stats["checked"] / total) if total > 0 else 0)
+        with stats_lock:
+            checked = stats["checked"]
+            otp = stats["otp_sent"]
+            no_acc = stats["no_account"]
+        update_stats(stats_labels, checked, total, otp, no_acc)
+        progress.set((checked / total) if total > 0 else 0)
         progress.update()
 
     running = False
     log_message(log_text, f"\n✅ Done. Total success: {len(success_numbers)}\n")
     result_box.delete("1.0", "end")
     result_box.insert("1.0", "\n".join(success_numbers))
-    update_stats(stats_labels, stats["checked"], total, stats["otp_sent"], stats["no_account"])
+    with stats_lock:
+        checked = stats["checked"]
+        otp = stats["otp_sent"]
+        no_acc = stats["no_account"]
+    update_stats(stats_labels, checked, total, otp, no_acc)
+    log_message(log_text, f"📊 Final Stats - Checked: {checked}, OTP Sent: {otp}, No Account: {no_acc}\n")
     progress.set(1.0)
     
     if stop_btn:
@@ -689,12 +1029,30 @@ def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_v
         start_btn.configure(state="normal")
 
 def stop_bot(log_text, stop_btn=None, start_btn=None):
-    global running, browser_windows
+    global running, browser_windows, active_tabs
     
     running = False
-    log_message(log_text, "🛑 STOPPING - Closing all browsers...\n")
+    log_message(log_text, "🛑 STOPPING - Force closing all tabs and browsers...\n")
     
     closed_count = 0
+    
+    # Method 1: Close all tracked tabs from active_tabs
+    with tab_lock:
+        tabs_to_close = list(active_tabs.items())
+    
+    for tab_id, tab_info in tabs_to_close:
+        try:
+            log_message(log_text, f"🛑 Force closing Tab #{tab_id} ({tab_info['number']})\n")
+            tab_info['driver'].quit()
+            closed_count += 1
+        except:
+            pass
+    
+    # Clear active tabs
+    with tab_lock:
+        active_tabs.clear()
+    
+    # Method 2: Close all browsers in browser_windows list
     for driver in browser_windows[:]:
         try:
             driver.quit()
@@ -703,7 +1061,9 @@ def stop_bot(log_text, stop_btn=None, start_btn=None):
             pass
     
     browser_windows.clear()
-    log_message(log_text, f"✅ STOPPED! Closed {closed_count} browsers.\n")
+    
+    log_message(log_text, f"✅ STOPPED! Force closed {closed_count} tabs/browsers.\n")
+    log_message(log_text, f"✅ All operations terminated.\n")
     
     if stop_btn:
         stop_btn.configure(state="disabled")
@@ -723,10 +1083,18 @@ def toggle_headless_mode(enabled):
     hidden_mode = enabled
 
 def update_stats(labels, checked, total, otp_sent=0, no_account=0):
-    remaining = total - checked
-    labels["total"].configure(text=f"{total}")
-    labels["otp_sent"].configure(text=f"{otp_sent}")
-    labels["no_account"].configure(text=f"{no_account}")
+    try:
+        remaining = total - checked
+        labels["total"].configure(text=f"{total}")
+        labels["otp_sent"].configure(text=f"{otp_sent}")
+        labels["no_account"].configure(text=f"{no_account}")
+        
+        # Update tab statistics
+        if "active_tabs" in labels:
+            total_tabs, working_tabs, idle_tabs = get_tab_info()
+            labels["active_tabs"].configure(text=f"{total_tabs} ({working_tabs}W/{idle_tabs}I)")
+    except:
+        pass  # Ignore update errors during UI refresh
 
 # =====================================================
 # 🎨 MODERN GUI
@@ -1112,7 +1480,8 @@ def main():
     stat_configs = [
         ("total", "📦 Total Numbers", "#6C5CE7", "#A29BFE"),
         ("otp_sent", "✅ OTP Sent", "#00B894", "#55EFC4"),
-        ("no_account", "❌ No Account", "#FF7675", "#FFA8A8")
+        ("no_account", "❌ No Account", "#FF7675", "#FFA8A8"),
+        ("active_tabs", "🆔 Active Tabs", "#0984E3", "#74B9FF")
     ]
     
     for idx, (key, text, color1, color2) in enumerate(stat_configs):
