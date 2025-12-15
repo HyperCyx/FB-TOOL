@@ -34,16 +34,16 @@ MAX_CONCURRENCY = 30
 WINDOW_SIZE = (980, 720)
 STAGGER = 40
 
-# Embedded Proxy Configuration (Default - can be overridden from UI)
-DEFAULT_PROXY = "c5dc26dff0213e3f.abcproxy.vip:4950:abc5650020_kaqz-zone-abc-region-SL:98459013"
+# Embedded Proxy Configuration (User configurable from UI)
+DEFAULT_PROXY = ""
 LOCAL_PROXY_PORT = 8889
 
 # Global proxy configuration (set from UI)
 current_proxy_config = {
-    'host': 'c5dc26dff0213e3f.abcproxy.vip',
-    'port': 4950,
-    'user': 'abc5650020_kaqz-zone-abc-region-SL',
-    'pass': '98459013'
+    'host': '',
+    'port': 0,
+    'user': '',
+    'pass': ''
 }
 # ===========================================
 
