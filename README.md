@@ -4,6 +4,7 @@
 
 **ONE FILE = EVERYTHING!**
 - ✅ Bot + Embedded Proxy in single file
+- ✅ **License Protection System** with online verification
 - ✅ Auto-start proxy system
 - ✅ Cross-platform (Windows/Linux/Mac)
 - ✅ Multilingual button detection (10+ languages)
@@ -19,10 +20,13 @@
 
 ```
 FB-TOOL/
-├── FB_Recovery_Bot_Complete.py  ← 🎯 RUN THIS FILE
+├── FB_Recovery_Bot_Complete.py  ← 🎯 RUN THIS FILE (Main Application)
+├── license_manager.py           ← License verification system
+├── license_ui.py                ← License activation UI
 ├── build_exe.py                 ← Windows EXE builder
 ├── BUILD_EXE.bat                ← One-click EXE build
-└── README.md                    ← This file
+├── README.md                    ← This file
+└── LICENSE_SETUP.md             ← License configuration guide
 ```
 
 ## 🚀 Quick Start
@@ -34,23 +38,38 @@ FB-TOOL/
 
 2. **Install Dependencies**
    ```cmd
-   pip install selenium webdriver-manager customtkinter CTkMessagebox pyperclip
+   pip install selenium webdriver-manager customtkinter CTkMessagebox pyperclip requests
    ```
 
-3. **Run the Bot**
+3. **Configure License** (See [LICENSE_SETUP.md](LICENSE_SETUP.md))
+   - Update `SERVER_API_KEY` in `license_manager.py`
+   - Update `PRODUCT_ID` with your product ID
+
+4. **Run the Bot**
    ```cmd
    python FB_Recovery_Bot_Complete.py
    ```
    Or simply **double-click** the file!
+   
+5. **Enter License Key**
+   - First launch shows license activation window
+   - Enter your license key
+   - Check "Remember this license" for auto-login
+   - Bot starts automatically after verification
 
 ### Linux/Mac Installation
 
 ```bash
 # 1. Install dependencies
-pip3 install selenium webdriver-manager customtkinter CTkMessagebox pyperclip
+pip3 install selenium webdriver-manager customtkinter CTkMessagebox pyperclip requests
 
-# 2. Run the bot
+# 2. Configure license (see LICENSE_SETUP.md)
+# Update license_manager.py with your API key and product ID
+
+# 3. Run the bot
 python3 FB_Recovery_Bot_Complete.py
+
+# 4. Enter license key when prompted
 ```
 
 ### Building Windows EXE
@@ -106,7 +125,41 @@ Auto-detects buttons in **10+ languages**:
 
 No more "button not found" errors on non-English Facebook!
 
-## 🔧 Key Features
+## � License Protection System
+
+### How It Works
+The bot includes a professional license verification system that:
+
+- ✅ **License Activation Window**: Beautiful UI for entering license key
+- ✅ **Online Verification**: Validates license with your license server
+- ✅ **Auto-Save**: Remembers license key for future launches
+- ✅ **Background Verification**: Checks saved license automatically
+- ✅ **Hardware Binding**: License tied to specific machine
+- ✅ **Heartbeat System**: Maintains "online" device status
+- ✅ **Multi-device Tracking**: Tracks active devices per license
+
+### First Launch
+1. License activation window appears
+2. Enter your license key
+3. Click "Activate License"
+4. System verifies with license server
+5. If valid, bot launches automatically
+6. License saved locally (if "Remember" checked)
+
+### Subsequent Launches
+1. Bot checks saved license in background
+2. Auto-verifies without blocking
+3. Opens immediately if valid
+4. Shows activation window if invalid/expired
+
+### Configuration
+See [LICENSE_SETUP.md](LICENSE_SETUP.md) for detailed setup instructions:
+- Update API key and product ID
+- Configure license server URLs
+- Customize heartbeat intervals
+- Security best practices
+
+## �🔧 Key Features
 
 ### 🌐 Proxy System
 - ✅ **Custom Proxy Input**: Enter your own proxy with caching
