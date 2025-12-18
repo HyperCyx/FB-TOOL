@@ -1,90 +1,107 @@
-# 🎯 FB RECOVERY BOT - ALL-IN-ONE EDITION
+# 🎯 FB RECOVERY BOT - Professional Edition
 
 ## ✨ Features
 
-**ONE FILE = EVERYTHING!**
-- ✅ Bot + Embedded Proxy in single file
-- ✅ **License Protection System** with online verification
-- ✅ Auto-start proxy system
+**COMPLETE AUTOMATED SOLUTION**
+- ✅ Facebook Account Recovery Automation
+- ✅ **Professional License System** with online verification
+- ✅ **Advanced Anti-Debug Protection** (x64dbg, OllyDbg, IDA Pro)
+- ✅ Embedded Proxy System (auto-start)
 - ✅ Cross-platform (Windows/Linux/Mac)
 - ✅ Multilingual button detection (10+ languages)
 - ✅ Real-time statistics tracking
 - ✅ Custom proxy support with caching
-- ✅ Professional Material Design UI
+- ✅ Modern Material Design UI
 - ✅ **Intelligent Tab Tracking System**
 - ✅ **Auto-close idle tabs after 30s**
 - ✅ **Unique Tab IDs in logs**
-- ✅ **Live tab monitoring (Working/Idle)**
+- ✅ **Standalone EXE Builder** (no dependencies)
 
 ## 📁 Project Structure
 
 ```
 FB-TOOL/
-├── FB_Recovery_Bot_Complete.py  ← 🎯 RUN THIS FILE (Main Application)
-├── license_manager.py           ← License verification system
+├── FB_Recovery_Bot_Complete.py  ← 🎯 Main Application
+├── license_manager.py           ← License verification & API
 ├── license_ui.py                ← License activation UI
-├── build_exe.py                 ← Windows EXE builder
-├── BUILD_EXE.bat                ← One-click EXE build
-├── README.md                    ← This file
-└── LICENSE_SETUP.md             ← License configuration guide
+├── protection.py                ← Anti-debug protection system
+├── build_exe.py                 ← Standalone EXE builder
+├── .gitignore                   ← Git configuration
+└── README.md                    ← This file (you are here)
 ```
 
 ## 🚀 Quick Start
 
-### Windows Installation
+### Option 1: Run Python Script (Development)
 
-1. **Install Python** (3.8+) from [python.org](https://www.python.org/)
+**1. Install Python** (3.8+) from [python.org](https://www.python.org/)
    - ✅ Check "Add Python to PATH" during installation
 
-2. **Install Dependencies**
-   ```cmd
-   pip install selenium webdriver-manager customtkinter CTkMessagebox pyperclip requests
-   ```
-
-3. **Configure License** (See [LICENSE_SETUP.md](LICENSE_SETUP.md))
-   - Update `SERVER_API_KEY` in `license_manager.py`
-   - Update `PRODUCT_ID` with your product ID
-
-4. **Run the Bot**
-   ```cmd
-   python FB_Recovery_Bot_Complete.py
-   ```
-   Or simply **double-click** the file!
-   
-5. **Enter License Key**
-   - First launch shows license activation window
-   - Enter your license key
-   - Check "Remember this license" for auto-login
-   - Bot starts automatically after verification
-
-### Linux/Mac Installation
-
+**2. Install Dependencies**
 ```bash
-# 1. Install dependencies
-pip3 install selenium webdriver-manager customtkinter CTkMessagebox pyperclip requests
+# Windows
+pip install selenium webdriver-manager customtkinter CTkMessagebox pyperclip requests psutil
 
-# 2. Configure license (see LICENSE_SETUP.md)
-# Update license_manager.py with your API key and product ID
-
-# 3. Run the bot
-python3 FB_Recovery_Bot_Complete.py
-
-# 4. Enter license key when prompted
+# Linux/Mac
+pip3 install selenium webdriver-manager customtkinter CTkMessagebox pyperclip requests psutil
 ```
 
-### Building Windows EXE
+**3. Run the Bot**
+```bash
+# Windows
+python FB_Recovery_Bot_Complete.py
 
-Create a standalone executable that runs without Python:
+# Linux/Mac
+python3 FB_Recovery_Bot_Complete.py
+```
 
+**4. Enter License Key**
+   - License activation window appears on first launch
+   - Enter your license key
+   - License saves automatically
+   - Bot launches immediately after verification
+
+---
+
+### Option 2: Build Standalone EXE (Distribution)
+
+Create a standalone executable with **NO dependencies required**:
+
+**Windows:**
 ```cmd
-# Easy way - double-click
-BUILD_EXE.bat
-
-# Or use Python
 python build_exe.py
 ```
 
-Output: `dist/FB_Recovery_Bot.exe` (~80-120 MB)
+**Linux/Mac:**
+```bash
+python3 build_exe.py
+```
+
+**Output:**
+- `dist/FB_Recovery_Bot` (Linux: 35 MB)
+- `dist/FB_Recovery_Bot.exe` (Windows: 60-90 MB)
+- Includes: Python runtime + all dependencies + your code
+- **No installation needed** - just run the executable!
+
+**Distribution Package:**
+- `FB_Recovery_Bot_Distribution/` - Ready to share
+- `FB_Recovery_Bot_Distribution_v1.0_[Platform].zip` - Compressed archive
+
+---
+
+### Option 3: Use Pre-built Executable (End Users)
+
+If you have the executable:
+```bash
+# Linux
+chmod +x FB_Recovery_Bot
+./FB_Recovery_Bot
+
+# Windows
+FB_Recovery_Bot.exe  (double-click)
+```
+
+**No Python, no pip, no dependencies - just run!**
 
 ## 🌐 Embedded Proxy System
 
@@ -125,39 +142,79 @@ Auto-detects buttons in **10+ languages**:
 
 No more "button not found" errors on non-English Facebook!
 
-## � License Protection System
+## 🔒 License & Protection System
 
-### How It Works
-The bot includes a professional license verification system that:
+### License Verification
+Professional online license system with modern UI:
 
-- ✅ **License Activation Window**: Beautiful UI for entering license key
-- ✅ **Online Verification**: Validates license with your license server
-- ✅ **Auto-Save**: Remembers license key for future launches
-- ✅ **Background Verification**: Checks saved license automatically
-- ✅ **Hardware Binding**: License tied to specific machine
-- ✅ **Heartbeat System**: Maintains "online" device status
-- ✅ **Multi-device Tracking**: Tracks active devices per license
+**Features:**
+- ✅ **Beautiful Activation UI**: Modern light theme (500x420)
+- ✅ **Online Verification**: Real-time API validation
+- ✅ **Auto-Save**: License saved automatically (hidden file)
+- ✅ **Silent Auto-Launch**: No window if already licensed
+- ✅ **Device Binding**: License tied to specific machine
+- ✅ **Multi-device Support**: Track active devices per license
+- ✅ **Expiration Dates**: Automatic expiry checking
+- ✅ **Clear Error Messages**: Detailed error explanations
 
-### First Launch
+**First Launch:**
 1. License activation window appears
 2. Enter your license key
 3. Click "Activate License"
 4. System verifies with license server
-5. If valid, bot launches automatically
-6. License saved locally (if "Remember" checked)
+5. License saves automatically
+6. Bot launches immediately
 
-### Subsequent Launches
-1. Bot checks saved license in background
-2. Auto-verifies without blocking
-3. Opens immediately if valid
-4. Shows activation window if invalid/expired
+**Subsequent Launches:**
+- Checks saved license silently in background
+- Auto-launches if valid
+- Shows activation window only if expired/invalid
+
+**License Storage:**
+- Hidden file: `~/.fb_recovery_license`
+- Windows: Hidden attribute + dot-prefix
+- Linux/Mac: Dot-prefix (invisible)
+
+### Anti-Debug Protection
+
+**Advanced Security System:**
+- 🛡️ **20+ Debugger Detection**: x64dbg, OllyDbg, IDA Pro, Cheat Engine, etc.
+- 🛡️ **VM Detection**: VMware, VirtualBox, QEMU
+- 🛡️ **Timing Attack Prevention**: Detects code stepping
+- 🛡️ **Process Monitoring**: Scans running processes
+- 🛡️ **Background Monitoring**: Checks every 2-3 seconds
+- 🛡️ **Silent Exit**: No error messages on violation
+- 🛡️ **Integrated**: Runs at startup and license check
+
+**Protection Flow:**
+1. Initializes before any code execution
+2. Checks for attached debuggers (Windows API/Linux TracerPid)
+3. Scans all running processes for known debuggers
+4. Detects virtual machine environments
+5. Monitors continuously in background thread
+6. Silent exit if any threat detected (no traces for attackers)
+
+**Makes License Bypass Nearly Impossible:**
+- Can't attach debuggers without detection
+- Can't step through code (timing detection)
+- Can't use common reverse engineering tools
+- Silent failure confuses attackers
+- Multiple overlapping detection layers
 
 ### Configuration
-See [LICENSE_SETUP.md](LICENSE_SETUP.md) for detailed setup instructions:
-- Update API key and product ID
-- Configure license server URLs
-- Customize heartbeat intervals
-- Security best practices
+
+**License API Setup:**
+Edit `license_manager.py`:
+```python
+SERVER_API_KEY = "your_api_key_here"
+PRODUCT_ID = "your_product_id"
+LICENSE_API_URL = "https://your-server.com/api/verifyLicense"
+```
+
+**Current Configuration:**
+- API: `https://licencess.netlify.app/api/verifyLicense`
+- API Key: `lg_server_8fd7679cfb1f4708a876e6fb1f70f9d5`
+- Product ID: `prod_ea740f0d`
 
 ## �🔧 Key Features
 
@@ -327,28 +384,82 @@ pip install --upgrade selenium webdriver-manager
 | Network | 5 Mbps | 10+ Mbps |
 | Chrome | Latest | Latest |
 
-## 🏗️ Building Windows EXE
+## 🏗️ Building Standalone Executable
 
 ### Quick Build
-```cmd
-BUILD_EXE.bat
-```
 
-### Manual Build
-```bash
-pip install pyinstaller
+**Windows:**
+```cmd
 python build_exe.py
 ```
 
-### Output
-- **File**: `dist/FB_Recovery_Bot.exe`
-- **Size**: ~80-120 MB (all dependencies included)
-- **Portable**: Runs on any Windows 10/11 without Python
+**Linux/Mac:**
+```bash
+python3 build_exe.py
+```
 
-### Distribution Package
-- Executable + Documentation
-- ZIP archive ready to share
-- No installation required for end users
+### What Happens:
+1. ✅ Auto-installs PyInstaller (if needed)
+2. ✅ Creates build spec with all dependencies
+3. ✅ Compiles Python code to bytecode
+4. ✅ Packages everything into ONE file
+5. ✅ Creates distribution folder
+6. ✅ Generates ZIP archive
+
+**Build Time:** 2-5 minutes
+
+### Output Files
+
+**Executable:**
+- Linux: `dist/FB_Recovery_Bot` (35 MB)
+- Windows: `dist/FB_Recovery_Bot.exe` (60-90 MB)
+
+**Distribution Package:**
+- `FB_Recovery_Bot_Distribution/` folder
+- `FB_Recovery_Bot_Distribution_v1.0_[Platform].zip`
+- Includes: Executable + README + Documentation
+
+### What's Embedded:
+
+✅ **Your Code:**
+- FB_Recovery_Bot_Complete.py (84 KB)
+- license_manager.py (4.6 KB)
+- license_ui.py (11 KB)
+- protection.py (8.0 KB)
+
+✅ **ALL Dependencies (15+ packages):**
+- customtkinter, selenium, requests, psutil
+- webdriver-manager, pyperclip, pygetwindow
+- Pillow, cryptography, certifi, urllib3
+- And more...
+
+✅ **Python Runtime:**
+- Complete Python 3.12 interpreter
+- Standard library
+- Dynamic libraries
+
+**Result:** One file with everything! No Python installation needed!
+
+### For End Users:
+
+**Windows:**
+- Extract ZIP
+- Double-click `FB_Recovery_Bot.exe`
+- Enter license key
+- Use bot!
+
+**Linux:**
+```bash
+chmod +x FB_Recovery_Bot
+./FB_Recovery_Bot
+```
+
+**Requirements for Users:**
+- ❌ No Python needed
+- ❌ No pip install needed
+- ❌ No dependencies needed
+- ✅ Just Chrome browser
+- ✅ Internet connection
 
 ## � Best Practices
 

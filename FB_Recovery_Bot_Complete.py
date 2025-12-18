@@ -2194,6 +2194,20 @@ def main():
     root.mainloop()
 
 if __name__ == "__main__":
+    # Initialize anti-debug protection FIRST (before any output)
+    try:
+        from protection import init_protection, verify_environment
+        # Verify environment is safe
+        verify_environment()
+        # Start continuous monitoring
+        init_protection()
+    except ImportError:
+        pass  # Protection module not available
+    except:
+        # Silent exit on any protection error
+        import os
+        os._exit(1)
+    
     print("=" * 60)
     print("  FB RECOVERY BOT - ALL-IN-ONE EDITION")
     print(f"  Platform: {platform.system()} {platform.release()}")

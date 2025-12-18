@@ -43,6 +43,14 @@ a = Analysis(
         'webdriver_manager.chrome',
         'pyperclip',
         'pygetwindow',
+        'requests',
+        'psutil',
+        'license_manager',
+        'license_ui',
+        'protection',
+        'threading',
+        'ctypes',
+        'ctypes.wintypes',
     ],
     hookspath=[],
     hooksconfig={},
@@ -70,13 +78,14 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # No console window
+    console=False,  # No console window - GUI app with license system
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=None,  # Add icon path here if you have one
+    version_info=None,  # Add version info here if needed
 )
 '''
     
@@ -121,11 +130,21 @@ def build_exe():
         print("\n" + "="*60)
         print("✅ BUILD SUCCESSFUL!")
         print("="*60)
-        print(f"\n📦 Executable created: dist/FB_Recovery_Bot.exe")
-        print(f"📊 File size: {os.path.getsize('dist/FB_Recovery_Bot.exe') / (1024*1024):.2f} MB\n")
+        
+        # Determine executable name based on platform
+        import platform
+        exe_name = 'FB_Recovery_Bot.exe' if platform.system() == 'Windows' else 'FB_Recovery_Bot'
+        exe_path = os.path.join('dist', exe_name)
+        
+        if os.path.exists(exe_path):
+            print(f"\n📦 Executable created: dist/{exe_name}")
+            print(f"📊 File size: {os.path.getsize(exe_path) / (1024*1024):.2f} MB\n")
+        else:
+            print(f"\n⚠️  Executable name may differ on this platform")
+            print(f"📁 Check dist/ folder for output\n")
         
         # Create distribution package
-        create_distribution()
+        create_distribution(exe_name)
         
         return True
         
@@ -133,18 +152,22 @@ def build_exe():
         print(f"\n❌ Build failed: {e}")
         return False
 
-def create_distribution():
+def create_distribution(exe_name='FB_Recovery_Bot.exe'):
     """Create a distribution package with readme"""
     print("📦 Creating distribution package...")
     
     # Create dist folder structure
-    dist_folder = 'FB_Recovery_Bot_Windows'
+    dist_folder = 'FB_Recovery_Bot_Distribution'
     if os.path.exists(dist_folder):
         shutil.rmtree(dist_folder)
     os.makedirs(dist_folder)
     
     # Copy executable
-    shutil.copy('dist/FB_Recovery_Bot.exe', dist_folder)
+    exe_path = os.path.join('dist', exe_name)
+    if os.path.exists(exe_path):
+        shutil.copy(exe_path, dist_folder)
+    else:
+        print(f"⚠️  Warning: {exe_path} not found, skipping copy")
     
     # Create README for Windows users
     readme_content = """
@@ -171,6 +194,9 @@ def create_distribution():
 ✅ Embedded proxy support
 ✅ Real-time statistics
 ✅ Headless mode option
+✅ Professional license system with online verification
+✅ Advanced anti-debug protection
+✅ Automatic license management
 ✅ Cross-platform compatible
 
 ## Proxy Configuration
@@ -186,12 +212,26 @@ To use a custom proxy:
 - **OTP Sent**: Successfully sent SMS
 - **No Account**: Numbers without Facebook accounts
 
+## First Launch
+
+On first launch, you'll see a license activation window:
+1. Enter your license key
+2. Click "Activate License"
+3. License will be saved automatically
+4. Bot will launch immediately after activation
+
 ## Troubleshooting
 
 ### Bot won't start
 - Make sure Chrome is installed
 - Run as Administrator if needed
 - Check antivirus isn't blocking
+- Close any debugger/developer tools
+
+### License Issues
+- Check internet connection for license verification
+- Ensure license key is valid and not expired
+- Contact support if device limit is reached
 
 ### Chrome not found
 - Install Google Chrome from google.com/chrome
@@ -224,19 +264,26 @@ Developed with ❤️ using Python + CustomTkinter
         f.write(readme_content)
     
     # Copy documentation if exists
-    docs = ['QUICKSTART.md', 'PROXY_FEATURES.md', 'PROXY_FIXES.md']
+    docs = ['QUICKSTART.md', 'PROXY_FEATURES.md', 'PROXY_FIXES.md', 'LICENSE_SETUP.md', 'PROTECTION_SYSTEM.md']
     for doc in docs:
         if os.path.exists(doc):
-            shutil.copy(doc, dist_folder)
+            try:
+                shutil.copy(doc, dist_folder)
+                print(f"   📄 Copied: {doc}")
+            except:
+                pass
     
     # Create ZIP archive
-    archive_name = f'{dist_folder}_v1.0'
+    import platform
+    platform_name = platform.system()
+    archive_name = f'{dist_folder}_v1.0_{platform_name}'
     print(f"🗜️  Creating ZIP archive: {archive_name}.zip")
     shutil.make_archive(archive_name, 'zip', dist_folder)
     
     print(f"\n✅ Distribution package created!")
     print(f"📁 Folder: {dist_folder}/")
-    print(f"📦 Archive: {archive_name}.zip\n")
+    print(f"📦 Archive: {archive_name}.zip")
+    print(f"🖥️  Platform: {platform_name}\n")
 
 if __name__ == "__main__":
     print("""
