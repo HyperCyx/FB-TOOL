@@ -1130,6 +1130,7 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
         
         # Only handle account selection if page is detected
         if account_selection_detected:
+            try:
                 log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Multiple accounts found - clicking FIRST account FAST...\n")
                 update_activity('working')
                 time.sleep(0.15)  # Reduced wait
@@ -1138,23 +1139,22 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                 first_clickable = None
                 
                 # FASTEST METHOD: Target exact "Choose Your Account" page structure
-                try:
-                    # Priority 1: Find account items with specific class structure (from inspection)
-                    account_items = driver.find_elements(By.XPATH, 
-                        "//div[contains(@class, 'item') and contains(@class, '_7br9') and @data-sigil='marea']//a[contains(@class, 'touchable') and contains(@class, 'primary')]")
-                    
-                    if account_items and len(account_items) > 0:
-                        # Click FIRST account link
-                        first_clickable = account_items[0]
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ Found {len(account_items)} accounts - clicking FIRST...\n")
-                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
-                        driver.execute_script("arguments[0].click();", first_clickable)
-                        account_selected = True
-                        time.sleep(0.3)
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ FIRST account clicked successfully\n")
-                    else:
-                        # Fallback: Broader search for all possible account elements
-                        all_elements = driver.find_elements(By.XPATH, 
+                # Priority 1: Find account items with specific class structure (from inspection)
+                account_items = driver.find_elements(By.XPATH, 
+                    "//div[contains(@class, 'item') and contains(@class, '_7br9') and @data-sigil='marea']//a[contains(@class, 'touchable') and contains(@class, 'primary')]")
+                
+                if account_items and len(account_items) > 0:
+                    # Click FIRST account link
+                    first_clickable = account_items[0]
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ Found {len(account_items)} accounts - clicking FIRST...\n")
+                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
+                    driver.execute_script("arguments[0].click();", first_clickable)
+                    account_selected = True
+                    time.sleep(0.3)
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ FIRST account clicked successfully\n")
+                else:
+                    # Fallback: Broader search for all possible account elements
+                    all_elements = driver.find_elements(By.XPATH, 
                             "//div[@data-sigil='marea']//a[contains(@class, 'touchable')] | "
                             "//a[contains(@class, 'touchable') and contains(@class, 'primary')] | "
                             "//label[contains(@class, 'recover')] | "
@@ -1165,36 +1165,34 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                             "//table//tr[@data-sigil='touchable'] | "
                             "//table//tr[.//input[@type='radio']] | "
                             "//div[@data-sigil='touchable'] | "
-                            "//form//label[1] | "
-                            "//form//tr[1]")
+                        "//form//label[1] | "
+                        "//form//tr[1]")
+                    
+                    # Find FIRST visible element from all collected
+                    for elem in all_elements:
+                        try:
+                            if elem.is_displayed():
+                                first_clickable = elem
+                                break  # STOP at first visible
+                        except:
+                            continue
+                    
+                    if first_clickable:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ FALLBACK - clicking FIRST account element...\n")
+                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
+                        driver.execute_script("arguments[0].click();", first_clickable)
+                        account_selected = True
+                        time.sleep(0.3)
                         
-                        # Find FIRST visible element from all collected
-                        for elem in all_elements:
+                        # If it was a radio button, also click its label
+                        if first_clickable.tag_name == 'input':
                             try:
-                                if elem.is_displayed():
-                                    first_clickable = elem
-                                    break  # STOP at first visible
+                                elem_id = first_clickable.get_attribute('id')
+                                if elem_id:
+                                    label = driver.find_element(By.XPATH, f"//label[@for='{elem_id}']")
+                                    driver.execute_script("arguments[0].click();", label)
                             except:
-                                continue
-                        
-                        if first_clickable:
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ FALLBACK - clicking FIRST account element...\n")
-                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
-                            driver.execute_script("arguments[0].click();", first_clickable)
-                            account_selected = True
-                            time.sleep(0.3)
-                            
-                            # If it was a radio button, also click its label
-                            if first_clickable.tag_name == 'input':
-                                try:
-                                    elem_id = first_clickable.get_attribute('id')
-                                    if elem_id:
-                                        label = driver.find_element(By.XPATH, f"//label[@for='{elem_id}']")
-                                        driver.execute_script("arguments[0].click();", label)
-                                except:
-                                    pass
-                except Exception as e:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection error: {str(e)[:30]}\n")
+                                pass
                 
                 # Fallback: Try clicking first visible element in page (last resort)
                 if not account_selected:
@@ -1235,11 +1233,11 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                             time.sleep(0.3)
                     except Exception as e:
                         log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Continue button error: {str(e)[:30]}\n")
-                else:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not auto-select account (5 methods tried)\n")
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Continuing anyway - may need manual selection...\n")
-        except Exception as e:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection check error: {str(e)[:50]}\n")
+                    else:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not auto-select account (5 methods tried)\n")
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Continuing anyway - may need manual selection...\n")
+            except Exception as e:
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection check error: {str(e)[:50]}\n")
         
         # Skip early error check - we'll check AFTER SMS send attempt
         if not running:
