@@ -1066,94 +1066,194 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                 # Method 1: Look for clickable labels/divs with account info (most common on mbasic)
                 try:
                     # Look for labels that typically contain account names/photos
-                    account_options = driver.find_elements(By.XPATH, "//label[contains(@class, 'recover')] | //label[@data-sigil='touchable']")
+                    account_options = driver.find_elements(By.XPATH, "//label[contains(@class, 'recover')] | //label[@data-sigil='touchable'] | //label[contains(@for, 'radio')]")
                     
                     if account_options and len(account_options) > 0:
-                        # Click first visible account
+                        # Always click THE FIRST visible account (index 0)
+                        first_account = None
                         for account in account_options:
                             if account.is_displayed():
-                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 1)...\n")
-                                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", account)
-                                driver.execute_script("arguments[0].click();", account)
-                                account_selected = True
-                                time.sleep(0.3)
-                                break
-                except:
-                    pass
+                                first_account = account
+                                break  # Found first visible, stop searching
+                        
+                        if first_account:
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Clicking FIRST account (Method 1 - Label)...\n")
+                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_account)
+                            time.sleep(0.1)
+                            driver.execute_script("arguments[0].click();", first_account)
+                            account_selected = True
+                            time.sleep(0.4)
+                except Exception as e:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 1 failed: {str(e)[:30]}\n")
                 
-                # Method 2: Look for radio buttons or checkboxes
+                # Method 2: Look for radio buttons or checkboxes (select FIRST one)
                 if not account_selected:
                     try:
                         radio_buttons = driver.find_elements(By.XPATH, "//input[@type='radio'] | //input[@type='checkbox']")
                         if radio_buttons and len(radio_buttons) > 0:
-                            # Click first radio/checkbox
+                            # Always click THE FIRST radio/checkbox
+                            first_radio = None
                             for radio in radio_buttons:
                                 if radio.is_displayed():
-                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 2)...\n")
-                                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", radio)
-                                    driver.execute_script("arguments[0].click();", radio)
-                                    account_selected = True
-                                    time.sleep(0.3)
-                                    break
-                    except:
-                        pass
+                                    first_radio = radio
+                                    break  # Found first, stop
+                            
+                            if first_radio:
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Clicking FIRST account (Method 2 - Radio)...\n")
+                                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_radio)
+                                time.sleep(0.1)
+                                driver.execute_script("arguments[0].click();", first_radio)
+                                # Also click the associated label if exists
+                                try:
+                                    radio_id = first_radio.get_attribute('id')
+                                    if radio_id:
+                                        label = driver.find_element(By.XPATH, f"//label[@for='{radio_id}']")
+                                        if label and label.is_displayed():
+                                            driver.execute_script("arguments[0].click();", label)
+                                except:
+                                    pass
+                                account_selected = True
+                                time.sleep(0.4)
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 2 failed: {str(e)[:30]}\n")
                 
-                # Method 3: Look for any clickable div/button with account-like structure
+                # Method 3: Look for table rows (mbasic often uses tables for account list)
                 if not account_selected:
                     try:
-                        # Look for divs or buttons that might be account cards
-                        account_elements = driver.find_elements(By.XPATH, "//div[@role='button'] | //a[contains(@href, 'account')] | //button[contains(@class, 'account')]")
-                        if account_elements and len(account_elements) > 0:
-                            for elem in account_elements:
-                                if elem.is_displayed():
-                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 3)...\n")
-                                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", elem)
-                                    driver.execute_script("arguments[0].click();", elem)
-                                    account_selected = True
-                                    time.sleep(0.3)
-                                    break
-                    except:
-                        pass
-                
-                # Method 4: Look for table rows (mbasic often uses tables)
-                if not account_selected:
-                    try:
-                        table_rows = driver.find_elements(By.XPATH, "//tr[@data-sigil='touchable'] | //table//tr[contains(@class, 'touchable')]")
+                        table_rows = driver.find_elements(By.XPATH, "//table//tr[@data-sigil='touchable'] | //table//tr[contains(@class, 'touchable')] | //table//tr[.//input[@type='radio']]")
                         if table_rows and len(table_rows) > 0:
-                            # Click first table row
+                            # Always click THE FIRST table row
+                            first_row = None
                             for row in table_rows:
                                 if row.is_displayed():
-                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 4)...\n")
-                                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", row)
-                                    driver.execute_script("arguments[0].click();", row)
+                                    first_row = row
+                                    break  # Found first, stop
+                            
+                            if first_row:
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Clicking FIRST account (Method 3 - Table Row)...\n")
+                                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_row)
+                                time.sleep(0.1)
+                                driver.execute_script("arguments[0].click();", first_row)
+                                account_selected = True
+                                time.sleep(0.4)
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 3 failed: {str(e)[:30]}\n")
+                
+                # Method 4: Look for any clickable div/button/link with account structure
+                if not account_selected:
+                    try:
+                        # Look for divs, buttons, or links that might be account cards
+                        account_elements = driver.find_elements(By.XPATH, "//div[@role='button'] | //a[contains(@href, 'recover')] | //div[contains(@class, 'account')] | //div[@data-sigil='touchable']")
+                        if account_elements and len(account_elements) > 0:
+                            # Always click THE FIRST element
+                            first_elem = None
+                            for elem in account_elements:
+                                if elem.is_displayed() and elem.is_enabled():
+                                    first_elem = elem
+                                    break  # Found first, stop
+                            
+                            if first_elem:
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Clicking FIRST account (Method 4 - Div/Button)...\n")
+                                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_elem)
+                                time.sleep(0.1)
+                                driver.execute_script("arguments[0].click();", first_elem)
+                                account_selected = True
+                                time.sleep(0.4)
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 4 failed: {str(e)[:30]}\n")
+                
+                # Method 5: Look for any form with radio buttons and click first
+                if not account_selected:
+                    try:
+                        # Find form containing account selection
+                        forms = driver.find_elements(By.XPATH, "//form[.//input[@type='radio']]")
+                        if forms and len(forms) > 0:
+                            # Get all clickable elements in first form
+                            first_form = forms[0]
+                            clickable = first_form.find_elements(By.XPATH, ".//label | .//tr | .//div[@data-sigil='touchable']")
+                            if clickable and len(clickable) > 0:
+                                first_clickable = clickable[0]
+                                if first_clickable.is_displayed():
+                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Clicking FIRST account (Method 5 - Form)...\n")
+                                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
+                                    time.sleep(0.1)
+                                    driver.execute_script("arguments[0].click();", first_clickable)
                                     account_selected = True
-                                    time.sleep(0.3)
-                                    break
-                    except:
-                        pass
+                                    time.sleep(0.4)
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 5 failed: {str(e)[:30]}\n")
                 
                 if account_selected:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Account selected, continuing...\n")
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ FIRST account selected successfully!\n")
                     time.sleep(0.5)  # Wait for page to load after account selection
                     
-                    # After account selection, there might be a "Continue" button
+                    # After account selection, there might be a "Continue" or "Next" button
                     try:
+                        # Look for Continue/Next button
                         continue_btn = find_send_button(driver)
                         if continue_btn:
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔹 Clicking Continue after account selection...\n")
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔹 Clicking Continue/Next button...\n")
                             driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", continue_btn)
+                            time.sleep(0.1)
                             driver.execute_script("arguments[0].click();", continue_btn)
-                            time.sleep(0.5)
-                    except:
-                        pass
+                            time.sleep(0.6)
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Proceeding to recovery options...\n")
+                        else:
+                            # No button found, account click might have auto-submitted
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  No Continue button needed, auto-proceeding...\n")
+                            time.sleep(0.3)
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Continue button error: {str(e)[:30]}\n")
                 else:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not select account - continuing anyway...\n")
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not auto-select account (5 methods tried)\n")
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Continuing anyway - may need manual selection...\n")
         except Exception as e:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection check error: {str(e)[:50]}\n")
         
-        # Check for "No search result" or similar messages
+        # Check for "Sorry, something went wrong" error message
         if not running:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after account selection\n")
+            update_activity('stopped')
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
+            return
+        
+        try:
+            page_text = driver.page_source.lower()
+            
+            # Check for "Sorry, something went wrong" error
+            error_indicators = [
+                "sorry, something went wrong",
+                "something went wrong",
+                "sorry something went wrong",
+                "an error occurred",
+                "error occurred",
+                "দুঃখিত, কিছু ভুল হয়েছে",  # Bengali: Sorry, something went wrong
+                "কিছু ভুল হয়েছে"  # Bengali: Something went wrong
+            ]
+            
+            for error in error_indicators:
+                if error in page_text:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Facebook error: '{error}' - closing tab\n")
+                    log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
+                    update_activity('stopped')
+                    with stats_lock:
+                        stats["checked"] += 1
+                    try:
+                        driver.quit()
+                        unregister_tab(tab_id)
+                    except:
+                        pass
+                    return
+        except Exception as e:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not check for error message: {str(e)[:40]}\n")
+        
+        # Check for "No search result" or similar messages
+        if not running:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after error check\n")
             update_activity('stopped')
             try:
                 driver.quit()
@@ -1174,6 +1274,12 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                 "doesn't match",
                 "not found",
                 "no account found",
+                "doesn't match an account",
+                "doesn't match any account",
+                "try again or create an account",
+                "please try again or create",
+                "create an account",
+                "no account on that number",
                 "পাওয়া যায়নি",  # Bengali: Not found
                 "ফলাফল নেই"  # Bengali: No result
             ]
@@ -1182,7 +1288,7 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             
             for indicator in no_result_indicators:
                 if indicator in page_text:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ No account found - closing tab\n")
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ No account found: '{indicator}' - closing tab\n")
                     log_number_status(log_text, number, 'completed', result='no_account', worker_id=tab_id)
                     update_activity('stopped')
                     with stats_lock:
