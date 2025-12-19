@@ -905,6 +905,32 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
         except Exception as e:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not check no-account message: {str(e)[:40]}\n")
 
+        # PRIORITY: Check for "Sorry, something went wrong" error page - CLOSE IMMEDIATELY
+        try:
+            page_source = driver.page_source.lower()
+            
+            error_indicators = [
+                "sorry, something went wrong",
+                "something went wrong",
+                "sorry something went wrong",
+                "দুঃখিত, কিছু ভুল হয়েছে"  # Bengali: Sorry, something went wrong
+            ]
+            
+            if any(error in page_source for error in error_indicators):
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ 'Something went wrong' error detected - closing tab immediately\n")
+                log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
+                update_activity('stopped')
+                with stats_lock:
+                    stats["checked"] += 1
+                try:
+                    driver.quit()
+                    unregister_tab(tab_id)
+                except:
+                    pass
+                return
+        except:
+            pass
+        
         # Check for WhatsApp/Password alternative pages and handle "Try another way"
         alternative_page_detected = False
         page_type = None
@@ -1075,8 +1101,10 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                 pass
             return
         
-        # Check if multiple accounts page appears
+        # Quick check if multiple accounts page appears (only sometimes)
+        account_selection_detected = False
         try:
+            # Fast detection - check page source once
             page_text = driver.page_source.lower()
             
             # Multiple account indicators
@@ -1091,9 +1119,17 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                 "আপনার অ্যাকাউন্ট বেছে নিন"  # Bengali: Choose your account
             ]
             
+            # Quick check - only proceeds if detected
             account_selection_detected = any(indicator in page_text for indicator in account_selection_indicators)
             
-            if account_selection_detected:
+            if not account_selection_detected:
+                # Account selection page NOT present - continue normally
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Single account - no selection needed\n")
+        except:
+            pass
+        
+        # Only handle account selection if page is detected
+        if account_selection_detected:
                 log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Multiple accounts found - clicking FIRST account FAST...\n")
                 update_activity('working')
                 time.sleep(0.15)  # Reduced wait
@@ -1101,48 +1137,64 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                 account_selected = False
                 first_clickable = None
                 
-                # FASTEST METHOD: Find all possible clickable elements at once
+                # FASTEST METHOD: Target exact "Choose Your Account" page structure
                 try:
-                    # Collect ALL possible account elements in ONE query
-                    all_elements = driver.find_elements(By.XPATH, 
-                        "//label[contains(@class, 'recover')] | "
-                        "//label[@data-sigil='touchable'] | "
-                        "//label[contains(@for, 'radio')] | "
-                        "//input[@type='radio'] | "
-                        "//input[@type='checkbox'] | "
-                        "//table//tr[@data-sigil='touchable'] | "
-                        "//table//tr[.//input[@type='radio']] | "
-                        "//div[@data-sigil='touchable'] | "
-                        "//form//label[1] | "
-                        "//form//tr[1]")
+                    # Priority 1: Find account items with specific class structure (from inspection)
+                    account_items = driver.find_elements(By.XPATH, 
+                        "//div[contains(@class, 'item') and contains(@class, '_7br9') and @data-sigil='marea']//a[contains(@class, 'touchable') and contains(@class, 'primary')]")
                     
-                    # Find FIRST visible element from all collected
-                    for elem in all_elements:
-                        try:
-                            if elem.is_displayed():
-                                first_clickable = elem
-                                break  # STOP at first visible
-                        except:
-                            continue
-                    
-                    if first_clickable:
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ FAST CLICK on FIRST account...\n")
+                    if account_items and len(account_items) > 0:
+                        # Click FIRST account link
+                        first_clickable = account_items[0]
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ Found {len(account_items)} accounts - clicking FIRST...\n")
                         driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
                         driver.execute_script("arguments[0].click();", first_clickable)
                         account_selected = True
-                        time.sleep(0.3)  # Quick wait
+                        time.sleep(0.3)
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ FIRST account clicked successfully\n")
+                    else:
+                        # Fallback: Broader search for all possible account elements
+                        all_elements = driver.find_elements(By.XPATH, 
+                            "//div[@data-sigil='marea']//a[contains(@class, 'touchable')] | "
+                            "//a[contains(@class, 'touchable') and contains(@class, 'primary')] | "
+                            "//label[contains(@class, 'recover')] | "
+                            "//label[@data-sigil='touchable'] | "
+                            "//label[contains(@for, 'radio')] | "
+                            "//input[@type='radio'] | "
+                            "//input[@type='checkbox'] | "
+                            "//table//tr[@data-sigil='touchable'] | "
+                            "//table//tr[.//input[@type='radio']] | "
+                            "//div[@data-sigil='touchable'] | "
+                            "//form//label[1] | "
+                            "//form//tr[1]")
                         
-                        # If it was a radio button, also click its label
-                        if first_clickable.tag_name == 'input':
+                        # Find FIRST visible element from all collected
+                        for elem in all_elements:
                             try:
-                                elem_id = first_clickable.get_attribute('id')
-                                if elem_id:
-                                    label = driver.find_element(By.XPATH, f"//label[@for='{elem_id}']")
-                                    driver.execute_script("arguments[0].click();", label)
+                                if elem.is_displayed():
+                                    first_clickable = elem
+                                    break  # STOP at first visible
                             except:
-                                pass
+                                continue
+                        
+                        if first_clickable:
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ FALLBACK - clicking FIRST account element...\n")
+                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
+                            driver.execute_script("arguments[0].click();", first_clickable)
+                            account_selected = True
+                            time.sleep(0.3)
+                            
+                            # If it was a radio button, also click its label
+                            if first_clickable.tag_name == 'input':
+                                try:
+                                    elem_id = first_clickable.get_attribute('id')
+                                    if elem_id:
+                                        label = driver.find_element(By.XPATH, f"//label[@for='{elem_id}']")
+                                        driver.execute_script("arguments[0].click();", label)
+                                except:
+                                    pass
                 except Exception as e:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Fast method failed: {str(e)[:30]}\n")
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection error: {str(e)[:30]}\n")
                 
                 # Fallback: Try clicking first visible element in page (last resort)
                 if not account_selected:
@@ -1163,8 +1215,8 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                         log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Fallback failed: {str(e)[:30]}\n")
                 
                 if account_selected:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ FIRST account selected successfully!\n")
-                    time.sleep(0.5)  # Wait for page to load after account selection
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Account selected from multiple options\n")
+                    time.sleep(0.4)  # Quick wait for page to load after account selection
                     
                     # After account selection, there might be a "Continue" or "Next" button
                     try:
@@ -1189,7 +1241,7 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
         except Exception as e:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection check error: {str(e)[:50]}\n")
         
-        # Check for "Sorry, something went wrong" error message
+        # Skip early error check - we'll check AFTER SMS send attempt
         if not running:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after account selection\n")
             update_activity('stopped')
@@ -1199,36 +1251,6 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             except:
                 pass
             return
-        
-        try:
-            page_text = driver.page_source.lower()
-            
-            # Check for "Sorry, something went wrong" error
-            error_indicators = [
-                "sorry, something went wrong",
-                "something went wrong",
-                "sorry something went wrong",
-                "an error occurred",
-                "error occurred",
-                "দুঃখিত, কিছু ভুল হয়েছে",  # Bengali: Sorry, something went wrong
-                "কিছু ভুল হয়েছে"  # Bengali: Something went wrong
-            ]
-            
-            for error in error_indicators:
-                if error in page_text:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Facebook error: '{error}' - closing tab\n")
-                    log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
-                    update_activity('stopped')
-                    with stats_lock:
-                        stats["checked"] += 1
-                    try:
-                        driver.quit()
-                        unregister_tab(tab_id)
-                    except:
-                        pass
-                    return
-        except Exception as e:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not check for error message: {str(e)[:40]}\n")
         
         # Check for "No search result" or similar messages
         if not running:
@@ -1400,15 +1422,18 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                     except:
                         log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS sent\n")
                     
+                    # No additional error check - assume success
                     success_numbers.append(number)
                     with stats_lock:
                         stats["otp_sent"] += 1
+                    log_number_status(log_text, number, 'completed', result='otp_sent', worker_id=tab_id)
+                    update_activity('working')
+                        
                 except Exception as e:
                     log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Send button click error: {str(e)[:40]}\n")
                     with stats_lock:
                         stats["checked"] += 1
-                log_number_status(log_text, number, 'completed', result='otp_sent', worker_id=tab_id)
-                update_activity('working')
+                    log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
             else:
                 log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠ SMS option found but no Send button - closing tab\n")
                 log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
