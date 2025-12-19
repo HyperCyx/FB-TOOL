@@ -669,6 +669,232 @@ def close_all_idle_tabs(log_text):
     
     return closed_count
 
+
+def detect_page_type(driver):
+    """
+    ULTRA-FAST page detection system - detects ALL possible pages in ONE scan
+    Returns: (page_type, elements_dict) where page_type is one of:
+    - 'no_account': Account doesn't exist
+    - 'error': Something went wrong page
+    - 'password': Password entry page
+    - 'whatsapp': WhatsApp verification page
+    - 'multiple_accounts': Account selection page
+    - 'sms_options': SMS recovery options page
+    - 'code_sent': OTP code sent page (SUCCESS)
+    - 'input': Initial input page
+    - 'unknown': Unknown page state
+    """
+    try:
+        # Get page source ONCE - single DOM access for speed
+        page_source = driver.page_source.lower()
+        
+        # Priority 1: SUCCESS - Code sent page (check first for immediate return)
+        success_indicators = ['code sent', 'sent to', 'check your', 'enter the code', 
+                            'enter code', 'confirmation code', 'we sent', "we've sent"]
+        if any(indicator in page_source for indicator in success_indicators):
+            return 'code_sent', {}
+        
+        # Priority 2: ERRORS - No account found
+        no_account_phrases = ["doesn't match an account", "doesn't match any account", 
+                             "does not match an account", "no account found", 
+                             "couldn't find your account", "can't find your account",
+                             "no search results", "no results found", "try again or create"]
+        if any(phrase in page_source for phrase in no_account_phrases):
+            return 'no_account', {}
+        
+        # Priority 3: ERRORS - Something went wrong
+        error_phrases = ["sorry, something went wrong", "something went wrong",
+                        "দুঃখিত, কিছু ভুল হয়েছে"]  # Bengali
+        if any(phrase in page_source for phrase in error_phrases):
+            return 'error', {}
+        
+        # Priority 4: Alternative recovery pages (Password/WhatsApp) - CHECK BEFORE SMS!
+        # Check for WhatsApp page first (more specific)
+        if 'whatsapp' in page_source:
+            try:
+                # Multiple methods to find "Try another way" button
+                bypass_button = None
+                
+                # Method 1: Text contains "try another way"
+                try:
+                    buttons = driver.find_elements(By.XPATH, 
+                        "//a[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')] | "
+                        "//button[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')]")
+                    bypass_button = next((e for e in buttons if e.is_displayed()), None)
+                except:
+                    pass
+                
+                # Method 2: Look for any link/button on the page
+                if not bypass_button:
+                    try:
+                        all_links = driver.find_elements(By.XPATH, "//a[@href] | //button[@type='submit']")
+                        for link in all_links:
+                            if link.is_displayed() and 'another' in link.text.lower():
+                                bypass_button = link
+                                break
+                    except:
+                        pass
+                
+                return 'whatsapp', {'bypass_button': bypass_button}
+            except:
+                return 'whatsapp', {}
+        
+        # Check for password page
+        if 'password' in page_source or 'পাসওয়ার্ড' in page_source:
+            try:
+                # Multiple methods to find "Try another way" button
+                bypass_button = None
+                
+                # Method 1: Text contains "try another way"
+                try:
+                    buttons = driver.find_elements(By.XPATH, 
+                        "//a[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')] | "
+                        "//button[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')]")
+                    bypass_button = next((e for e in buttons if e.is_displayed()), None)
+                except:
+                    pass
+                
+                # Method 2: Look for any link/button on the page
+                if not bypass_button:
+                    try:
+                        all_links = driver.find_elements(By.XPATH, "//a[@href] | //button[@type='submit']")
+                        for link in all_links:
+                            if link.is_displayed() and 'another' in link.text.lower():
+                                bypass_button = link
+                                break
+                    except:
+                        pass
+                
+                return 'password', {'bypass_button': bypass_button}
+            except:
+                return 'password', {}
+        
+        # Priority 5: Multiple accounts selection
+        account_selection_phrases = ["choose your account", "choose an account", 
+                                     "select your account", "which account",
+                                     "একটি অ্যাকাউন্ট বেছে নিন"]  # Bengali
+        if any(phrase in page_source for phrase in account_selection_phrases):
+            # Find first account option
+            try:
+                account_items = driver.find_elements(By.XPATH,
+                    "//div[contains(@class, 'item') and contains(@class, '_7br9') and @data-sigil='marea']//a[contains(@class, 'touchable')]")
+                if account_items:
+                    return 'multiple_accounts', {'first_account': account_items[0]}
+            except:
+                pass
+            return 'multiple_accounts', {}
+        
+        # Priority 6: SMS recovery options page (check AFTER WhatsApp/Password)
+        # More specific check - make sure it's actual SMS options page, not just contains "sms"
+        sms_indicators = ['text message', 'sms', 'send code', 'choose', 'select']
+        has_sms = any(indicator in page_source for indicator in sms_indicators)
+        
+        # Make sure it's NOT a WhatsApp or password page
+        is_not_whatsapp = 'whatsapp' not in page_source
+        is_not_password = 'password' not in page_source or 'try another way' not in page_source
+        
+        if has_sms and is_not_whatsapp and is_not_password:
+            elements = {}
+            try:
+                # Priority 1: Look for radio button with name="recover_method" and value containing "send_sms"
+                try:
+                    recover_radios = driver.find_elements(By.XPATH,
+                        "//input[@type='radio'][@name='recover_method'][contains(@value, 'send_sms')] | "
+                        "//input[@type='radio'][@name='recover_method']")
+                    if recover_radios:
+                        for radio in recover_radios:
+                            if radio.is_displayed() or radio.get_attribute('checked'):
+                                elements['sms_option'] = radio
+                                break
+                except:
+                    pass
+                
+                # Priority 2: Use the helper function to find SMS option
+                if not elements.get('sms_option'):
+                    sms_label = check_send_sms(driver)
+                    if sms_label:
+                        elements['sms_option'] = sms_label
+                
+                # Priority 3: Try to find radio button or input associated with SMS
+                if not elements.get('sms_option'):
+                    sms_elements = driver.find_elements(By.XPATH,
+                        "//label[contains(translate(., 'SMS', 'sms'), 'sms')] | "
+                        "//input[@type='radio'][contains(@id, 'sms') or contains(@value, 'sms')] | "
+                        "//label[contains(., 'Text message')] | "
+                        "//label[contains(., 'text message')] | "
+                        "//input[@type='radio']")
+                    for elem in sms_elements:
+                        if elem.is_displayed():
+                            elements['sms_option'] = elem
+                            break
+                
+                # Use the helper function to find Continue/Send button
+                send_btn = find_send_button(driver)
+                if send_btn:
+                    elements['send_button'] = send_btn
+                
+                # Fallback: Find any submit button
+                if not elements.get('send_button'):
+                    buttons = driver.find_elements(By.XPATH,
+                        "//button[@type='submit'] | //button[@name='reset_action'] | "
+                        "//input[@type='submit'] | //button[contains(@class, 'touchable')]")
+                    for btn in buttons:
+                        if btn.is_displayed() and btn.is_enabled():
+                            elements['send_button'] = btn
+                            break
+                
+                if elements:
+                    return 'sms_options', elements
+            except:
+                pass
+        
+        # Priority 7: Initial input page - check for input field presence
+        if 'identify' in page_source or 'recover' in page_source or 'search' in page_source:
+            return 'input', {}
+        
+        # If no specific page detected, but input field exists, treat as input page
+        try:
+            input_field = driver.find_element(By.ID, 'identify_email')
+            if input_field and input_field.is_displayed():
+                return 'input', {}
+        except:
+            pass
+        
+        return 'unknown', {}
+        
+    except Exception as e:
+        return 'unknown', {}
+
+
+
+def smart_wait_for_page_change(driver, current_page, log_text=None, tab_id=None, check_interval=0.15, max_wait=30):
+    """
+    Continuous reactive monitoring - checks every 0.15s for page changes
+    Returns immediately when ANY page change is detected
+    """
+    start = time.time()
+    last_log = start
+    
+    while time.time() - start < max_wait:
+        page_type, elements = detect_page_type(driver)
+        
+        # Immediate return on any change
+        if page_type != current_page and page_type != 'unknown':
+            elapsed = time.time() - start
+            if log_text and tab_id:
+                log_message(log_text, f"🆔 Tab #{tab_id}: ⚡ Detected '{page_type}' in {elapsed:.2f}s\n")
+            return page_type, elements
+        
+        # Status update every 5s
+        if log_text and tab_id and (time.time() - last_log) >= 5:
+            elapsed = time.time() - start
+            log_message(log_text, f"🆔 Tab #{tab_id}: 👀 Still monitoring... ({int(elapsed)}s)\n")
+            last_log = time.time()
+        
+        time.sleep(check_interval)
+    
+    return 'timeout', {}
+
 def handle_window(driver, number, log_text, stats, using_proxy=False):
     global running
     
@@ -727,202 +953,62 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🌐 Using proxy - loading Facebook directly...\n")
             update_activity('working')
         
-        # Check timeout before loading Facebook
-        if check_timeout("Facebook page load start"):
-            stats["checked"] += 1
+        # Load Facebook recovery page
+        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔄 Loading Facebook...\n")
+        driver.get("https://mbasic.facebook.com/login/identify/")
+        time.sleep(2)  # Brief initial load wait
+        
+        if check_timeout("after Facebook load"):
             return
         
+        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Facebook loaded\n")
         update_activity('working')
-        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔵 Loading Facebook recovery page...\n")
         
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🛑 Stopped before loading\n")
-            update_activity('stopped')
-            with stats_lock:
-                stats["checked"] += 1
+        # FIRST: Enter phone number on initial page
+        time.sleep(1)  # Brief wait for page to fully load
+        input_elem = find_input(driver)
+        if input_elem and input_elem.is_displayed():
             try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
-            return
-        
-        # Load Facebook with retry on timeout (reduced retries for large batches)
-        max_retries = 1  # Only 1 retry for efficiency with large batches
-        for retry in range(max_retries + 1):
-            # Check stop status before each attempt
-            if not running:
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🛑 Stopped during retry\n")
-                with stats_lock:
-                    stats["checked"] += 1
-                return
-            
-            try:
-                driver.get(URL)
-                time.sleep(random.uniform(0.3, 0.7))  # Reduced wait
-                update_activity('working')
-                break
-            except Exception as e:
-                if retry < max_retries:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Timeout, retry {retry+1}...\n")
-                    time.sleep(1)  # Shorter retry wait
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⌨️ Entering phone number\n")
+                input_elem.clear()
+                human_type(input_elem, number)
+                time.sleep(0.5)
+                
+                # Find and click search button
+                search_btn = find_search_button(driver)
+                if search_btn and search_btn.is_displayed() and search_btn.is_enabled():
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Clicking search\n")
+                    search_btn.click()
+                    time.sleep(2)  # Wait for page transition
                 else:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Load failed: {str(e)[:40]}\n")
-                    update_activity('idle')
-                    with stats_lock:
-                        stats["checked"] += 1
-                    return
-            
-            # Check timeout between retries
-            if check_timeout(f"Facebook load retry {retry+1}"):
-                with stats_lock:
-                    stats["checked"] += 1
-                return
-        
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🛑 Stopped during load\n")
-            update_activity('stopped')
-            with stats_lock:
-                stats["checked"] += 1
-            try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
-            return
-
-        # Check timeout before finding input
-        if check_timeout("finding input box"):
-            with stats_lock:
-                stats["checked"] += 1
-            return
-
-        # Check if stopped before input search
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🛑 Stopped before input search\n")
-            with stats_lock:
-                stats["checked"] += 1
-            return
-        
-        update_activity('working')
-        # Wait for input to be ready using WebDriverWait (reduced timeout for large batches)
-        try:
-            input_el = WebDriverWait(driver, 8).until(
-                lambda d: find_input(d)
-            )
-        except:
-            input_el = find_input(driver)
-        
-        if not input_el:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Input box not found - closing tab\n")
-            update_activity('stopped')
-            with stats_lock:
-                stats["checked"] += 1
-            try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
-            return
-
-        # Check if stopped before entering number
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🛑 Stopped before entering number\n")
-            with stats_lock:
-                stats["checked"] += 1
-            return
-
-        input_el.click()
-        time.sleep(0.1)
-        human_type(input_el, number)
-        update_activity('working')
-        time.sleep(0.2)
-
-        # Check timeout before clicking search
-        if check_timeout("clicking search button"):
-            with stats_lock:
-                stats["checked"] += 1
-            return
-
-        update_activity('working')
-        btn = find_search_button(driver)
-        if btn:
-            try:
-                # Try normal click first
-                btn.click()
-            except:
-                try:
-                    # Fallback to JavaScript click
-                    driver.execute_script("arguments[0].click();", btn)
-                except:
-                    # Last resort: press Enter
-                    input_el.send_keys(Keys.ENTER)
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Search button not found\n")
+            except Exception as e:
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error entering number: {e}\n")
         else:
-            # No button found, press Enter
-            input_el.send_keys(Keys.ENTER)
-
-        # Wait for page to load after search
-        time.sleep(1.5)
-        update_activity('working')
-
-        # Check timeout after search
-        if check_timeout("after search click"):
-            with stats_lock:
-                stats["checked"] += 1
-            return
-
-        # PRIORITY CHECK: Immediately check for "no account" message AFTER search
-        try:
-            page_text = driver.page_source.lower()
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Input field not found initially\n")
+        
+        # REACTIVE MONITORING LOOP - Handles pages in ANY order
+        current_page = 'input'
+        max_loops = 50  # Safety limit
+        loop_count = 0
+        
+        while loop_count < max_loops and running:
+            loop_count += 1
             
-            # Check for "doesn't match an account" message first
-            no_account_messages = [
-                "doesn't match an account",
-                "doesn't match any account", 
-                "does not match an account",
-                "does not match any account",
-                "try again or create an account",
-                "please try again or create",
-                "no account found",
-                "couldn't find your account",
-                "can't find your account",
-                "no search results",
-                "no results found"
-            ]
+            # Check timeout
+            if check_timeout(f"loop iteration {loop_count}"):
+                return
             
-            for msg in no_account_messages:
-                if msg in page_text:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ No account: '{msg}' detected - closing tab immediately\n")
-                    log_number_status(log_text, number, 'completed', result='no_account', worker_id=tab_id)
-                    update_activity('stopped')
-                    with stats_lock:
-                        stats["checked"] += 1
-                        stats["no_account"] += 1
-                    try:
-                        driver.quit()
-                        unregister_tab(tab_id)
-                    except:
-                        pass
-                    return
-        except Exception as e:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not check no-account message: {str(e)[:40]}\n")
-
-        # PRIORITY: Check for "Sorry, something went wrong" error page - CLOSE IMMEDIATELY
-        try:
-            page_source = driver.page_source.lower()
+            # Detect current page state
+            page_type, elements = detect_page_type(driver)
             
-            error_indicators = [
-                "sorry, something went wrong",
-                "something went wrong",
-                "sorry something went wrong",
-                "দুঃখিত, কিছু ভুল হয়েছে"  # Bengali: Sorry, something went wrong
-            ]
-            
-            if any(error in page_source for error in error_indicators):
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ 'Something went wrong' error detected - closing tab immediately\n")
-                log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
-                update_activity('stopped')
+            # Handle each page type
+            if page_type == 'code_sent':
+                # SUCCESS! Code was sent
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Code sent successfully!\n")
+                update_activity('completed')
                 with stats_lock:
+                    stats["code_sent"] += 1
                     stats["checked"] += 1
                 try:
                     driver.quit()
@@ -930,532 +1016,451 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
                 except:
                     pass
                 return
-        except:
-            pass
-        
-        # Check for WhatsApp/Password alternative pages and handle "Try another way"
-        alternative_page_detected = False
-        page_type = None
-        
-        try:
-            page_source = driver.page_source.lower()
             
-            # Method 1: Check for WhatsApp login code page
-            try:
-                whatsapp_message = driver.find_element(By.ID, 'account_recovery_initiate_view_label')
-                message_text = whatsapp_message.text.lower()
-                if 'whatsapp' in message_text and ('login code' in message_text or 'send you' in message_text):
-                    alternative_page_detected = True
-                    page_type = "WhatsApp"
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ WhatsApp login page detected\n")
-            except:
-                pass
-            
-            # Method 2: Check for password entry page
-            if not alternative_page_detected:
+            elif page_type == 'no_account':
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Account not found\n")
+                update_activity('completed')
+                with stats_lock:
+                    stats["not_found"] += 1
+                    stats["checked"] += 1
                 try:
-                    # Check for password-related text
-                    password_indicators = [
-                        ('password' in page_source and 'try another way' in page_source),
-                        ('enter your password' in page_source and 'try another way' in page_source),
-                        ('পাসওয়ার্ড' in page_source and 'try another way' in page_source)  # Bengali password
-                    ]
-                    
-                    if any(password_indicators):
-                        alternative_page_detected = True
-                        page_type = "Password"
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Password entry page detected\n")
+                    driver.quit()
+                    unregister_tab(tab_id)
                 except:
                     pass
+                return
             
-            # Method 3: Generic alternative method detection
-            if not alternative_page_detected:
+            elif page_type == 'error':
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Error page detected\n")
+                update_activity('completed')
+                with stats_lock:
+                    stats["errors"] += 1
+                    stats["checked"] += 1
                 try:
-                    # Look for any page with "try another way" that's not SMS page
-                    if 'try another way' in page_source:
-                        # Make sure it's not already on SMS page
-                        if 'sms' not in page_source or 'text message' not in page_source:
-                            alternative_page_detected = True
-                            page_type = "Alternative"
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Alternative recovery page detected\n")
+                    driver.quit()
+                    unregister_tab(tab_id)
                 except:
                     pass
-        except:
-            pass
-        
-        # Only proceed with bypass if alternative page detected
-        if alternative_page_detected:
-            try:
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ {page_type} recovery page - bypassing...\n")
-                update_activity('working')
-                time.sleep(0.2)
-                
-                # Multiple methods to find "Try another way" button/link
-                button_found = False
-                
-                # Method 1: Use WebDriverWait for instant "try another way" button detection
+                return
+            
+            elif page_type == 'password':
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔑 Password page detected\n")
                 try:
-                    try_another_elem = WebDriverWait(driver, 3).until(
-                        lambda d: next(
-                            (elem for elem in d.find_elements(By.XPATH, "//*[contains(translate(text(), 'TRY ANOTHER WAY', 'try another way'), 'try another way')]") 
-                             if elem.is_displayed()), 
-                            None
-                        )
-                    )
-                    if try_another_elem:
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Found 'Try another way' - clicking instantly...\n")
-                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", try_another_elem)
-                        driver.execute_script("arguments[0].click();", try_another_elem)
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Clicked 'Try another way'\n")
-                        button_found = True
-                        time.sleep(0.3)
-                except Exception as e:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 1 timeout: {str(e)[:30]}\n")
-                
-                # Method 2: Look for links/buttons with specific text
-                if not button_found:
-                    try_another_way_texts = ["Try another way", "try another way", "TRY ANOTHER WAY", "অন্যভাবে চেষ্টা করুন"]
-                    for text in try_another_way_texts:
+                    # Try to find and click "Try another way" button
+                    bypass_button = elements.get('bypass_button')
+                    if not bypass_button:
+                        # Try multiple methods to find "Try another way" button
                         try:
-                            try_another_btn = driver.find_element(By.XPATH, f"//a[contains(., '{text}')] | //button[contains(., '{text}')] | //span[contains(., '{text}')]")
-                            if try_another_btn and try_another_btn.is_displayed():
-                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Found button with text '{text}'\n")
-                                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", try_another_btn)
-                                driver.execute_script("arguments[0].click();", try_another_btn)
-                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Clicked 'Try another way'\n")
-                                button_found = True
-                                time.sleep(0.3)
-                                break
+                            # Method 1: Case-insensitive text search
+                            buttons = driver.find_elements(By.XPATH,
+                                "//a[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')] | "
+                                "//button[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')]")
+                            if buttons:
+                                bypass_button = next((b for b in buttons if b.is_displayed()), None)
                         except:
-                            continue
-                
-                # Method 3: Look for any clickable element with "another" in text
-                if not button_found:
-                    try:
-                        all_clickable = driver.find_elements(By.XPATH, "//a | //button | //span[@role='button']")
-                        for elem in all_clickable:
+                            pass
+                        
+                        # Method 2: Find by href or any visible link
+                        if not bypass_button:
                             try:
-                                elem_text = elem.text.lower()
-                                if 'another' in elem_text and 'way' in elem_text:
-                                    if elem.is_displayed():
-                                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Found alternative element - clicking...\n")
-                                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", elem)
-                                        driver.execute_script("arguments[0].click();", elem)
-                                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Clicked alternative button\n")
-                                        button_found = True
-                                        time.sleep(0.3)
+                                links = driver.find_elements(By.TAG_NAME, 'a')
+                                for link in links:
+                                    if link.is_displayed() and link.text and 'another' in link.text.lower():
+                                        bypass_button = link
                                         break
                             except:
-                                continue
-                    except:
-                        pass
-                
-                if not button_found:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Could not find 'Try another way' button\n")
-                else:
-                    # After clicking "Try another way", continue to next page
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Bypassed {page_type} page, continuing...\n")
-                    time.sleep(0.3)
+                                pass
                     
-                    # Check if another alternative page appears (nested recovery options)
-                    try:
-                        time.sleep(0.2)
-                        nested_page_source = driver.page_source.lower()
-                        
-                        # If another "try another way" appears, click it again
-                        if 'try another way' in nested_page_source:
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔄 Nested recovery page detected - clicking instantly...\n")
-                            
-                            # Use WebDriverWait for instant nested button detection
+                    if bypass_button and bypass_button.is_displayed():
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔑 Clicking 'Try another way'\n")
+                        bypass_button.click()
+                        # Wait for page change
+                        next_page, _ = smart_wait_for_page_change(driver, 'password', log_text, tab_id, max_wait=15)
+                        if next_page == 'timeout':
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout after password bypass\n")
+                            with stats_lock:
+                                stats["checked"] += 1
                             try:
-                                nested_elem = WebDriverWait(driver, 2).until(
-                                    lambda d: next(
-                                        (elem for elem in d.find_elements(By.XPATH, "//*[contains(translate(text(), 'TRY ANOTHER WAY', 'try another way'), 'try another way')]") 
-                                         if elem.is_displayed()), 
-                                        None
-                                    )
-                                )
-                            except:
-                                nested_try_another = driver.find_elements(By.XPATH, "//*[contains(translate(text(), 'TRY ANOTHER WAY', 'try another way'), 'try another way')]")
-                                nested_elem = next((elem for elem in nested_try_another if elem.is_displayed()), None)
-                            
-                            if nested_elem:
-                                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", nested_elem)
-                                driver.execute_script("arguments[0].click();", nested_elem)
-                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Clicked nested 'Try another way'\n")
-                                time.sleep(0.2)
-                    except:
-                        pass
-            except Exception as e:
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Alternative page bypass error: {str(e)[:50]}\n")
-        else:
-            # No alternative page detected, skip this section
-            pass
-
-        # Check for "Choose Your Account" page (multiple accounts found)
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after search\n")
-            update_activity('stopped')
-            try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
-            return
-        
-        # Quick check if multiple accounts page appears (only sometimes)
-        account_selection_detected = False
-        try:
-            # Fast detection - check page source once
-            page_text = driver.page_source.lower()
-            
-            # Multiple account indicators
-            account_selection_indicators = [
-                "choose your account",
-                "choose an account",
-                "select your account",
-                "select an account",
-                "which account",
-                "multiple accounts",
-                "একটি অ্যাকাউন্ট বেছে নিন",  # Bengali: Choose an account
-                "আপনার অ্যাকাউন্ট বেছে নিন"  # Bengali: Choose your account
-            ]
-            
-            # Quick check - only proceeds if detected
-            account_selection_detected = any(indicator in page_text for indicator in account_selection_indicators)
-            
-            if not account_selection_detected:
-                # Account selection page NOT present - continue normally
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Single account - no selection needed\n")
-        except:
-            pass
-        
-        # Only handle account selection if page is detected
-        if account_selection_detected:
-            try:
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Multiple accounts found - clicking FIRST account FAST...\n")
-                update_activity('working')
-                time.sleep(0.15)  # Reduced wait
-                
-                account_selected = False
-                first_clickable = None
-                
-                # FASTEST METHOD: Target exact "Choose Your Account" page structure
-                # Priority 1: Find account items with specific class structure (from inspection)
-                account_items = driver.find_elements(By.XPATH, 
-                    "//div[contains(@class, 'item') and contains(@class, '_7br9') and @data-sigil='marea']//a[contains(@class, 'touchable') and contains(@class, 'primary')]")
-                
-                if account_items and len(account_items) > 0:
-                    # Click FIRST account link
-                    first_clickable = account_items[0]
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ Found {len(account_items)} accounts - clicking FIRST...\n")
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
-                    driver.execute_script("arguments[0].click();", first_clickable)
-                    account_selected = True
-                    time.sleep(0.3)
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ FIRST account clicked successfully\n")
-                else:
-                    # Fallback: Broader search for all possible account elements
-                    all_elements = driver.find_elements(By.XPATH, 
-                            "//div[@data-sigil='marea']//a[contains(@class, 'touchable')] | "
-                            "//a[contains(@class, 'touchable') and contains(@class, 'primary')] | "
-                            "//label[contains(@class, 'recover')] | "
-                            "//label[@data-sigil='touchable'] | "
-                            "//label[contains(@for, 'radio')] | "
-                            "//input[@type='radio'] | "
-                            "//input[@type='checkbox'] | "
-                            "//table//tr[@data-sigil='touchable'] | "
-                            "//table//tr[.//input[@type='radio']] | "
-                            "//div[@data-sigil='touchable'] | "
-                        "//form//label[1] | "
-                        "//form//tr[1]")
-                    
-                    # Find FIRST visible element from all collected
-                    for elem in all_elements:
-                        try:
-                            if elem.is_displayed():
-                                first_clickable = elem
-                                break  # STOP at first visible
-                        except:
-                            continue
-                    
-                    if first_clickable:
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚡ FALLBACK - clicking FIRST account element...\n")
-                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", first_clickable)
-                        driver.execute_script("arguments[0].click();", first_clickable)
-                        account_selected = True
-                        time.sleep(0.3)
-                        
-                        # If it was a radio button, also click its label
-                        if first_clickable.tag_name == 'input':
-                            try:
-                                elem_id = first_clickable.get_attribute('id')
-                                if elem_id:
-                                    label = driver.find_element(By.XPATH, f"//label[@for='{elem_id}']")
-                                    driver.execute_script("arguments[0].click();", label)
+                                driver.quit()
+                                unregister_tab(tab_id)
                             except:
                                 pass
-                
-                # Fallback: Try clicking first visible element in page (last resort)
-                if not account_selected:
-                    try:
-                        # Get first clickable thing on page
-                        any_clickable = driver.find_elements(By.XPATH, "//a | //button | //label | //div[@role='button']")
-                        for elem in any_clickable[:10]:  # Check first 10 only
-                            try:
-                                if elem.is_displayed() and 'account' in elem.text.lower():
-                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Fallback click on account element...\n")
-                                    driver.execute_script("arguments[0].click();", elem)
-                                    account_selected = True
-                                    time.sleep(0.3)
-                                    break
-                            except:
-                                continue
-                    except Exception as e:
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Fallback failed: {str(e)[:30]}\n")
-                
-                if account_selected:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Account selected from multiple options\n")
-                    time.sleep(0.4)  # Quick wait for page to load after account selection
-                    
-                    # After account selection, there might be a "Continue" or "Next" button
-                    try:
-                        # Look for Continue/Next button
-                        continue_btn = find_send_button(driver)
-                        if continue_btn:
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔹 Clicking Continue/Next button...\n")
-                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", continue_btn)
-                            time.sleep(0.1)
-                            driver.execute_script("arguments[0].click();", continue_btn)
-                            time.sleep(0.6)
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Proceeding to recovery options...\n")
-                        else:
-                            # No button found, account click might have auto-submitted
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  No Continue button needed, auto-proceeding...\n")
-                            time.sleep(0.3)
-                    except Exception as e:
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Continue button error: {str(e)[:30]}\n")
+                            return
+                        continue  # Loop will handle next page
                     else:
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not auto-select account (5 methods tried)\n")
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Continuing anyway - may need manual selection...\n")
-            except Exception as e:
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection check error: {str(e)[:50]}\n")
-        
-        # Skip early error check - we'll check AFTER SMS send attempt
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after account selection\n")
-            update_activity('stopped')
-            try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
-            return
-        
-        # Check for "No search result" or similar messages
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after error check\n")
-            update_activity('stopped')
-            try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
-            return
-        
-        try:
-            # Secondary check for "no result" messages (backup check)
-            no_result_indicators = [
-                "couldn't find",
-                "can't find",
-                "no matches",
-                "পাওয়া যায়নি",  # Bengali: Not found
-                "ফলাফল নেই"  # Bengali: No result
-            ]
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Try another way button not found\n")
+                        time.sleep(2)
+                        continue
+                except Exception as e:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error bypassing password: {e}\n")
+                    time.sleep(1)
+                    continue
             
-            page_text = driver.page_source.lower()
+            elif page_type == 'whatsapp':
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📱 WhatsApp page detected\n")
+                try:
+                    # Try to find and click "Try another way" button
+                    bypass_button = elements.get('bypass_button')
+                    if not bypass_button:
+                        # Try multiple methods to find button
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Searching for 'Try another way' button...\n")
+                        try:
+                            # Method 1: Case-insensitive text search
+                            buttons = driver.find_elements(By.XPATH,
+                                "//a[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')] | "
+                                "//button[contains(translate(., 'TRY ANOTHER WAY', 'try another way'), 'try another')]")
+                            if buttons:
+                                bypass_button = next((b for b in buttons if b.is_displayed()), None)
+                        except:
+                            pass
+                        
+                        # Method 2: Find any visible link with 'another' text
+                        if not bypass_button:
+                            try:
+                                links = driver.find_elements(By.TAG_NAME, 'a')
+                                for link in links:
+                                    if link.is_displayed() and link.text and 'another' in link.text.lower():
+                                        bypass_button = link
+                                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Found button: '{link.text[:30]}'\n")
+                                        break
+                            except:
+                                pass
+                    
+                    if bypass_button and bypass_button.is_displayed():
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📱 Clicking 'Try another way'\n")
+                        bypass_button.click()
+                        # Wait for page change
+                        next_page, _ = smart_wait_for_page_change(driver, 'whatsapp', log_text, tab_id, max_wait=15)
+                        if next_page == 'timeout':
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout after WhatsApp bypass\n")
+                            with stats_lock:
+                                stats["checked"] += 1
+                            try:
+                                driver.quit()
+                                unregister_tab(tab_id)
+                            except:
+                                pass
+                            return
+                        continue
+                    else:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Try another way button not found\n")
+                        time.sleep(2)
+                        continue
+                except Exception as e:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error bypassing WhatsApp: {e}\n")
+                    time.sleep(1)
+                    continue
             
-            for indicator in no_result_indicators:
-                if indicator in page_text:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ No account (secondary check): '{indicator}' - closing tab\n")
-                    log_number_status(log_text, number, 'completed', result='no_account', worker_id=tab_id)
-                    update_activity('stopped')
-                    with stats_lock:
-                        stats["checked"] += 1
-                        stats["no_account"] += 1
+            elif page_type == 'multiple_accounts':
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 👥 Multiple accounts page detected\n")
+                try:
+                    # Try to find first account
+                    first_account = elements.get('first_account')
+                    if not first_account:
+                        # Try to find it manually
+                        try:
+                            account_items = driver.find_elements(By.XPATH,
+                                "//div[contains(@class, 'item')]//a[contains(@class, 'touchable')] | "
+                                "//a[contains(@href, 'recover')] | "
+                                "//table//a")
+                            if account_items:
+                                first_account = account_items[0]
+                        except:
+                            pass
+                    
+                    if first_account and first_account.is_displayed():
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 👥 Selecting first account\n")
+                        first_account.click()
+                        # Wait for next page
+                        next_page, _ = smart_wait_for_page_change(driver, 'multiple_accounts', log_text, tab_id, max_wait=15)
+                        if next_page == 'timeout':
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout after account selection\n")
+                            with stats_lock:
+                                stats["checked"] += 1
+                            try:
+                                driver.quit()
+                                unregister_tab(tab_id)
+                            except:
+                                pass
+                            return
+                        continue
+                    else:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection link not found\n")
+                        time.sleep(2)
+                        continue
+                except Exception as e:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error selecting account: {e}\n")
+                    time.sleep(1)
+                    continue
+            
+            elif page_type == 'sms_options':
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📲 SMS options page\n")
+                
+                # Step 1: Select SMS option - try multiple methods
+                sms_selected = False
+                
+                # Method 1: Use element from detection
+                if elements.get('sms_option') and not sms_selected:
                     try:
-                        driver.quit()
-                        unregister_tab(tab_id)
-                    except:
-                        pass
-                    return
-        except Exception as e:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not check for no-result: {str(e)[:40]}\n")
-
-        # Check timeout before SMS check
-        if check_timeout("SMS option check"):
-            with stats_lock:
-                stats["checked"] += 1
-            return
+                        sms_elem = elements['sms_option']
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📋 SMS option found: {sms_elem.tag_name}\n")
+                        sms_elem.click()
+                        time.sleep(0.3)
+                        
+                        # If it's a label, find and click associated radio button
+                        if sms_elem.tag_name == 'label':
+                            try:
+                                radio_id = sms_elem.get_attribute('for')
+                                if radio_id:
+                                    radio = driver.find_element(By.ID, radio_id)
+                                    if not radio.is_selected():
+                                        radio.click()
+                                        time.sleep(0.2)
+                            except:
+                                pass
+                        
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS option selected (method 1)\n")
+                        sms_selected = True
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 1 failed: {e}\n")
+                
+                # Method 2: Look for "Send code via SMS" div and click parent/container
+                if not sms_selected:
+                    try:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Looking for 'Send code via SMS' div...\n")
+                        sms_divs = driver.find_elements(By.XPATH,
+                            "//div[contains(., 'Send code via SMS') or contains(., 'send code via sms') or "
+                            "contains(., 'SMS') or contains(., 'Text message')]")
+                        
+                        for div in sms_divs:
+                            if div.is_displayed() and ('sms' in div.text.lower() or 'text message' in div.text.lower()):
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Found SMS div: '{div.text[:40]}'\n")
+                                
+                                # Try to click the div itself
+                                try:
+                                    div.click()
+                                    time.sleep(0.3)
+                                except:
+                                    pass
+                                
+                                # Try to find radio button near this div
+                                try:
+                                    parent = div.find_element(By.XPATH, './ancestor::div[1]')
+                                    radio = parent.find_element(By.XPATH, ".//input[@type='radio']")
+                                    if not radio.is_selected():
+                                        radio.click()
+                                        time.sleep(0.2)
+                                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Radio button clicked\n")
+                                except:
+                                    # Try clicking parent container
+                                    try:
+                                        parent = div.find_element(By.XPATH, './ancestor::div[contains(@class, "_") or contains(@class, "item")]')
+                                        parent.click()
+                                        time.sleep(0.2)
+                                    except:
+                                        pass
+                                
+                                sms_selected = True
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS option selected (method 2)\n")
+                                break
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 2 failed: {e}\n")
+                
+                # Method 3: Find radio button with name="recover_method" and value containing "send_sms"
+                if not sms_selected:
+                    try:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Looking for recover_method radio button...\n")
+                        # Look for the specific radio button with name="recover_method"
+                        radios = driver.find_elements(By.XPATH,
+                            "//input[@type='radio'][@name='recover_method'][contains(@value, 'send_sms')] | "
+                            "//input[@type='radio'][@name='recover_method']")
+                        
+                        for radio in radios:
+                            if radio.is_displayed() or radio.get_attribute('checked'):
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Found recover_method radio: {radio.get_attribute('id')}\n")
+                                
+                                # Click the radio button itself
+                                try:
+                                    radio.click()
+                                    time.sleep(0.2)
+                                except:
+                                    pass
+                                
+                                # Also click parent container to ensure selection
+                                try:
+                                    parent = radio.find_element(By.XPATH, './ancestor::div[contains(@class, "_5s61") or contains(@class, "_5xu4")][1]')
+                                    parent.click()
+                                    time.sleep(0.2)
+                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Clicked parent container\n")
+                                except:
+                                    try:
+                                        # Try clicking immediate parent
+                                        parent = radio.find_element(By.XPATH, './parent::div')
+                                        parent.click()
+                                        time.sleep(0.2)
+                                    except:
+                                        pass
+                                
+                                sms_selected = True
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS option selected (method 3)\n")
+                                break
+                        
+                        # If still not found, try any radio button
+                        if not sms_selected:
+                            radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
+                            for radio in radios:
+                                try:
+                                    if radio.is_displayed():
+                                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Found generic radio button\n")
+                                        radio.click()
+                                        time.sleep(0.2)
+                                        # Click parent too
+                                        try:
+                                            parent = radio.find_element(By.XPATH, './parent::div')
+                                            parent.click()
+                                            time.sleep(0.2)
+                                        except:
+                                            pass
+                                        sms_selected = True
+                                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS option selected (method 3 - generic)\n")
+                                        break
+                                except:
+                                    continue
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 3 failed: {e}\n")
+                
+                # Step 2: Click Continue/Send button - try multiple methods
+                time.sleep(0.7)  # Wait after SMS selection
+                
+                continue_clicked = False
+                
+                # Method 1: Use button from detection
+                if elements.get('send_button') and not continue_clicked:
+                    try:
+                        send_btn = elements['send_button']
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📤 Clicking Continue button (method 1)\n")
+                        send_btn.click()
+                        continue_clicked = True
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 1 failed: {e}\n")
+                
+                # Method 2: Use find_send_button helper
+                if not continue_clicked:
+                    try:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Using helper to find Continue button...\n")
+                        send_btn = find_send_button(driver)
+                        if send_btn:
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📤 Clicking Continue button (method 2)\n")
+                            send_btn.click()
+                            continue_clicked = True
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 2 failed: {e}\n")
+                
+                # Method 3: Find any submit button
+                if not continue_clicked:
+                    try:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Looking for any submit button...\n")
+                        buttons = driver.find_elements(By.XPATH,
+                            "//button[@type='submit'] | //input[@type='submit'] | "
+                            "//button[contains(@name, 'reset')] | //button[contains(., 'Continue')] | "
+                            "//button[contains(., 'Send')] | //button[contains(., 'Confirm')]")
+                        
+                        for btn in buttons:
+                            if btn.is_displayed() and btn.is_enabled():
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Found button: '{btn.text[:20] if btn.text else 'submit'}'\n")
+                                btn.click()
+                                continue_clicked = True
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📤 Button clicked (method 3)\n")
+                                break
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Method 3 failed: {e}\n")
+                
+                # If we clicked continue button, wait for result
+                if continue_clicked:
+                    try:
+                        # Wait for result
+                        next_page, _ = smart_wait_for_page_change(driver, 'sms_options', log_text, tab_id, max_wait=20)
+                        if next_page == 'timeout':
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout waiting for SMS result\n")
+                            with stats_lock:
+                                stats["checked"] += 1
+                            try:
+                                driver.quit()
+                                unregister_tab(tab_id)
+                            except:
+                                pass
+                            return
+                        continue
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error waiting for result: {e}\n")
+                        time.sleep(1)
+                        continue
+                else:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Could not click Continue button\n")
+                    time.sleep(2)
+                    continue
+            
+            elif page_type == 'input' or page_type == 'unknown':
+                # Initial input page or unknown - try to enter phone number
+                input_elem = find_input(driver)
+                if input_elem and input_elem.is_displayed():
+                    try:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⌨️ Entering phone number\n")
+                        input_elem.clear()
+                        human_type(input_elem, number)
+                        time.sleep(0.5)
+                        
+                        # Find and click search button
+                        search_btn = find_search_button(driver)
+                        if search_btn and search_btn.is_displayed() and search_btn.is_enabled():
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Clicking search\n")
+                            search_btn.click()
+                            
+                            # Wait for next page
+                            next_page, _ = smart_wait_for_page_change(driver, 'input', log_text, tab_id, max_wait=20)
+                            if next_page == 'timeout':
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout after search\n")
+                                with stats_lock:
+                                    stats["checked"] += 1
+                                try:
+                                    driver.quit()
+                                    unregister_tab(tab_id)
+                                except:
+                                    pass
+                                return
+                            continue
+                        else:
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Search button not ready\n")
+                            time.sleep(1)
+                            continue
+                    except Exception as e:
+                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error entering number: {e}\n")
+                        time.sleep(1)
+                        continue
+                else:
+                    # No input found - wait and retry
+                    time.sleep(1)
+                    continue
+            
+            else:
+                # Unknown state - wait briefly
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❓ Unknown page state - waiting\n")
+                time.sleep(2)
+                continue
         
-        # Check if stopped
-        if not running:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped before SMS check\n")
-            update_activity('stopped')
-            try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
-            return
-
-        update_activity('working')
-        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Looking for SMS/Text recovery option...\n")
-        
-        # Enhanced SMS option detection
-        sms_option = None
+        # If we reach here, we exceeded max loops
+        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Exceeded maximum loops ({max_loops})\n")
+        update_activity('completed')
+        with stats_lock:
+            stats["checked"] += 1
         try:
-            # Method 1: Use existing check_send_sms function with wait
-            sms_option = WebDriverWait(driver, 5).until(
-                lambda d: check_send_sms(d)
-            )
+            driver.quit()
+            unregister_tab(tab_id)
         except:
             pass
-        
-        # Method 2: Direct search for SMS-related elements if method 1 fails
-        if not sms_option:
-            try:
-                sms_elements = driver.find_elements(By.XPATH,
-                    "//label[contains(translate(., 'SMS', 'sms'), 'sms')] | "
-                    "//label[contains(translate(., 'TEXT', 'text'), 'text message')] | "
-                    "//input[@type='radio'][contains(@id, 'sms')] | "
-                    "//input[@type='radio'][contains(@value, 'sms')] | "
-                    "//label[contains(., 'Send code via SMS')] | "
-                    "//label[contains(., 'Text message')] | "
-                    "//div[contains(., 'SMS') and @data-sigil='touchable']")
-                for elem in sms_elements:
-                    if elem.is_displayed():
-                        sms_option = elem
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Found SMS option (direct search)\n")
-                        break
-            except:
-                pass
-        
-        if sms_option:
-            # Scroll SMS option into view and click immediately
-            try:
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", sms_option)
-                time.sleep(0.1)
-                driver.execute_script("arguments[0].click();", sms_option)
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS option clicked successfully\n")
-                update_activity('working')
-                time.sleep(0.3)  # Wait for SMS option to be selected
-            except Exception as e:
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ SMS click error: {str(e)[:40]}\n")
-
-            # Check timeout before send button
-            if check_timeout("finding send button"):
-                with stats_lock:
-                    stats["checked"] += 1
-                return
-
-            update_activity('working')
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔍 Looking for Send/Continue button...\n")
-            
-            # Enhanced send button detection
-            send_btn = None
-            try:
-                send_btn = WebDriverWait(driver, 5).until(
-                    lambda d: find_send_button(d)
-                )
-            except:
-                pass
-            
-            # Fallback: Direct button search
-            if not send_btn:
-                try:
-                    buttons = driver.find_elements(By.XPATH,
-                        "//button[@type='submit'] | "
-                        "//button[@name='reset_action'] | "
-                        "//button[@data-sigil='touchable'][@type='submit'] | "
-                        "//button[contains(., 'Continue')] | "
-                        "//button[contains(., 'Send')] | "
-                        "//input[@type='submit']")
-                    for btn in buttons:
-                        if btn.is_displayed() and btn.is_enabled():
-                            send_btn = btn
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✓ Found button (direct search)\n")
-                            break
-                except:
-                    pass
-            
-            if send_btn:
-                try:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 📤 Clicking Send/Continue button...\n")
-                    # Scroll and click
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", send_btn)
-                    time.sleep(0.1)
-                    driver.execute_script("arguments[0].click();", send_btn)
-                    update_activity('working')
-                    time.sleep(1)  # Wait for SMS to be sent
-                    
-                    # Verify SMS was sent by checking page content
-                    try:
-                        page_text = driver.page_source.lower()
-                        success_indicators = [
-                            "code sent",
-                            "sent to",
-                            "check your",
-                            "enter the code",
-                            "enter code",
-                            "confirmation code",
-                            "we sent",
-                            "we've sent"
-                        ]
-                        
-                        sms_sent_confirmed = any(indicator in page_text for indicator in success_indicators)
-                        
-                        if sms_sent_confirmed:
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS sent VERIFIED (code page detected)\n")
-                        else:
-                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS sent (assuming success)\n")
-                    except:
-                        log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ SMS sent\n")
-                    
-                    # No additional error check - assume success
-                    success_numbers.append(number)
-                    with stats_lock:
-                        stats["otp_sent"] += 1
-                    log_number_status(log_text, number, 'completed', result='otp_sent', worker_id=tab_id)
-                    update_activity('working')
-                        
-                except Exception as e:
-                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Send button click error: {str(e)[:40]}\n")
-                    with stats_lock:
-                        stats["checked"] += 1
-                    log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
-            else:
-                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠ SMS option found but no Send button - closing tab\n")
-                log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
-                update_activity('stopped')
-                with stats_lock:
-                    stats["checked"] += 1
-                try:
-                    driver.quit()
-                    unregister_tab(tab_id)
-                except:
-                    pass
-        else:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ No SMS option found - closing tab\n")
-            log_number_status(log_text, number, 'completed', result='failed', worker_id=tab_id)
-            update_activity('stopped')
-            with stats_lock:
-                stats["checked"] += 1
-            try:
-                driver.quit()
-                unregister_tab(tab_id)
-            except:
-                pass
+        return
+    
+    # END OF REACTIVE MONITORING LOOP
 
     except Exception as e:
         log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ❌ Error: {str(e)[:100]} - closing tab\n")
