@@ -1027,9 +1027,133 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             # No alternative page detected, skip this section
             pass
 
-        # Check for "No search result" or similar messages
+        # Check for "Choose Your Account" page (multiple accounts found)
         if not running:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after search\n")
+            update_activity('stopped')
+            try:
+                driver.quit()
+                unregister_tab(tab_id)
+            except:
+                pass
+            return
+        
+        # Check if multiple accounts page appears
+        try:
+            page_text = driver.page_source.lower()
+            
+            # Multiple account indicators
+            account_selection_indicators = [
+                "choose your account",
+                "choose an account",
+                "select your account",
+                "select an account",
+                "which account",
+                "multiple accounts",
+                "একটি অ্যাকাউন্ট বেছে নিন",  # Bengali: Choose an account
+                "আপনার অ্যাকাউন্ট বেছে নিন"  # Bengali: Choose your account
+            ]
+            
+            account_selection_detected = any(indicator in page_text for indicator in account_selection_indicators)
+            
+            if account_selection_detected:
+                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ℹ️  Multiple accounts found - selecting first account...\n")
+                update_activity('working')
+                time.sleep(0.2)
+                
+                account_selected = False
+                
+                # Method 1: Look for clickable labels/divs with account info (most common on mbasic)
+                try:
+                    # Look for labels that typically contain account names/photos
+                    account_options = driver.find_elements(By.XPATH, "//label[contains(@class, 'recover')] | //label[@data-sigil='touchable']")
+                    
+                    if account_options and len(account_options) > 0:
+                        # Click first visible account
+                        for account in account_options:
+                            if account.is_displayed():
+                                log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 1)...\n")
+                                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", account)
+                                driver.execute_script("arguments[0].click();", account)
+                                account_selected = True
+                                time.sleep(0.3)
+                                break
+                except:
+                    pass
+                
+                # Method 2: Look for radio buttons or checkboxes
+                if not account_selected:
+                    try:
+                        radio_buttons = driver.find_elements(By.XPATH, "//input[@type='radio'] | //input[@type='checkbox']")
+                        if radio_buttons and len(radio_buttons) > 0:
+                            # Click first radio/checkbox
+                            for radio in radio_buttons:
+                                if radio.is_displayed():
+                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 2)...\n")
+                                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", radio)
+                                    driver.execute_script("arguments[0].click();", radio)
+                                    account_selected = True
+                                    time.sleep(0.3)
+                                    break
+                    except:
+                        pass
+                
+                # Method 3: Look for any clickable div/button with account-like structure
+                if not account_selected:
+                    try:
+                        # Look for divs or buttons that might be account cards
+                        account_elements = driver.find_elements(By.XPATH, "//div[@role='button'] | //a[contains(@href, 'account')] | //button[contains(@class, 'account')]")
+                        if account_elements and len(account_elements) > 0:
+                            for elem in account_elements:
+                                if elem.is_displayed():
+                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 3)...\n")
+                                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", elem)
+                                    driver.execute_script("arguments[0].click();", elem)
+                                    account_selected = True
+                                    time.sleep(0.3)
+                                    break
+                    except:
+                        pass
+                
+                # Method 4: Look for table rows (mbasic often uses tables)
+                if not account_selected:
+                    try:
+                        table_rows = driver.find_elements(By.XPATH, "//tr[@data-sigil='touchable'] | //table//tr[contains(@class, 'touchable')]")
+                        if table_rows and len(table_rows) > 0:
+                            # Click first table row
+                            for row in table_rows:
+                                if row.is_displayed():
+                                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔘 Selecting first account (Method 4)...\n")
+                                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", row)
+                                    driver.execute_script("arguments[0].click();", row)
+                                    account_selected = True
+                                    time.sleep(0.3)
+                                    break
+                    except:
+                        pass
+                
+                if account_selected:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Account selected, continuing...\n")
+                    time.sleep(0.5)  # Wait for page to load after account selection
+                    
+                    # After account selection, there might be a "Continue" button
+                    try:
+                        continue_btn = find_send_button(driver)
+                        if continue_btn:
+                            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🔹 Clicking Continue after account selection...\n")
+                            driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", continue_btn)
+                            driver.execute_script("arguments[0].click();", continue_btn)
+                            time.sleep(0.5)
+                    except:
+                        pass
+                else:
+                    log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Could not select account - continuing anyway...\n")
+        except Exception as e:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Account selection check error: {str(e)[:50]}\n")
+        
+        # Check for "No search result" or similar messages
+        if not running:
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⛔ Stopped after account selection\n")
             update_activity('stopped')
             try:
                 driver.quit()
@@ -1171,40 +1295,35 @@ def handle_window(driver, number, log_text, stats, using_proxy=False):
             pass
         return
     finally:
-        # Calculate total execution time
+        # ALWAYS close the browser tab when done (success, error, or timeout)
         total_time = time.time() - start_time
         
-        # Only close browser in these cases:
-        # 1. User manually stopped (not running)
-        # 2. OTP was successfully sent
-        should_close = False
-        
+        # Determine reason for closure
         if not running:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): 🛑 Stopped by user - closing tab\n")
             update_activity('stopped')
-            should_close = True
         elif number in success_numbers:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ OTP sent successfully - closing tab in {int(total_time)}s\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ✅ Success - closing tab after {int(total_time)}s\n")
             update_activity('working')
-            should_close = True
         elif total_time > MAX_EXECUTION_TIME:
             log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⏱️ Timeout after {int(total_time)}s - closing tab\n")
             update_activity('stopped')
-            if number not in success_numbers:  # Only count if not already counted
-                stats["checked"] += 1
-            should_close = True
+            if number not in success_numbers:
+                with stats_lock:
+                    stats["checked"] += 1
         else:
-            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Issue detected - closing tab\n")
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Error occurred - closing tab\n")
             update_activity('stopped')
-            should_close = True
         
-        # Only quit driver if should_close is True
-        if should_close:
-            try:
-                driver.quit()
-                unregister_tab(tab_id)  # Remove from tracking when closed
-            except:
-                pass
+        # ALWAYS close browser and unregister tab (no conditions)
+        try:
+            driver.quit()
+        except Exception as e:
+            # Log quit error but continue
+            log_message(log_text, f"🆔 Tab #{tab_id} ({number}): ⚠️ Browser close error: {str(e)[:30]}\n")
+        finally:
+            # Always unregister tab even if quit fails
+            unregister_tab(tab_id)
 
 def open_browser_instance(index, number, log_text, stats, proxy_config=None):
     using_proxy = False
@@ -2195,14 +2314,45 @@ def main():
 
 if __name__ == "__main__":
     # Initialize anti-debug protection FIRST (before any output)
+    protection_enabled = True
     try:
-        from protection import init_protection, verify_environment
+        from protection import init_protection, verify_environment, ProtectionSystem
+        
+        # Create protection instance and do immediate check
+        protection = ProtectionSystem()
+        
+        # Check for debuggers BEFORE any GUI or license check
+        if protection.check_debugger_attached():
+            print("\n" + "="*60)
+            print("❌ SECURITY ALERT: Debugger detected (attached)")
+            print("Application cannot run while debugging tools are active.")
+            print("="*60 + "\n")
+            protection.silent_exit()
+        
+        if protection.check_debugger_processes():
+            print("\n" + "="*60)
+            print("❌ SECURITY ALERT: Debugging software detected")
+            print("Please close all debugging tools and try again.")
+            print("="*60 + "\n")
+            protection.silent_exit()
+        
+        if protection.check_vm_environment():
+            print("\n" + "="*60)
+            print("⚠️  WARNING: Virtual machine detected")
+            print("="*60 + "\n")
+            # Allow VM but log it
+        
         # Verify environment is safe
         verify_environment()
         # Start continuous monitoring
         init_protection()
+        
     except ImportError:
-        pass  # Protection module not available
+        protection_enabled = False
+        print("⚠️  Warning: Protection module not available")
+    except SystemExit:
+        # Let protection system exit naturally
+        raise
     except:
         # Silent exit on any protection error
         import os

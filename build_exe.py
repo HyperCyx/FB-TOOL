@@ -67,17 +67,14 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
+    [],  # Empty - will be in separate files for faster startup
+    exclude_binaries=True,  # FASTER: Don't bundle everything in one file
     name='FB_Recovery_Bot',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,  # No console window - GUI app with license system
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -85,7 +82,17 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,  # Add icon path here if you have one
-    version_info=None,  # Add version info here if needed
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='FB_Recovery_Bot',
 )
 '''
     
@@ -131,17 +138,27 @@ def build_exe():
         print("✅ BUILD SUCCESSFUL!")
         print("="*60)
         
-        # Determine executable name based on platform
+        # Determine executable location (now in folder structure)
         import platform
+        exe_folder = os.path.join('dist', 'FB_Recovery_Bot')
         exe_name = 'FB_Recovery_Bot.exe' if platform.system() == 'Windows' else 'FB_Recovery_Bot'
-        exe_path = os.path.join('dist', exe_name)
+        exe_path = os.path.join(exe_folder, exe_name)
         
         if os.path.exists(exe_path):
-            print(f"\n📦 Executable created: dist/{exe_name}")
-            print(f"📊 File size: {os.path.getsize(exe_path) / (1024*1024):.2f} MB\n")
+            print(f"\n📦 Executable created: {exe_folder}/{exe_name}")
+            print(f"📊 Executable size: {os.path.getsize(exe_path) / (1024*1024):.2f} MB")
+            
+            # Calculate total folder size
+            total_size = 0
+            for dirpath, dirnames, filenames in os.walk(exe_folder):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    total_size += os.path.getsize(filepath)
+            print(f"📊 Total package size: {total_size / (1024*1024):.2f} MB")
+            print(f"⚡ FASTER STARTUP: Files are pre-extracted (no temp extraction)\n")
         else:
             print(f"\n⚠️  Executable name may differ on this platform")
-            print(f"📁 Check dist/ folder for output\n")
+            print(f"📁 Check dist/FB_Recovery_Bot/ folder for output\n")
         
         # Create distribution package
         create_distribution(exe_name)
@@ -162,12 +179,13 @@ def create_distribution(exe_name='FB_Recovery_Bot.exe'):
         shutil.rmtree(dist_folder)
     os.makedirs(dist_folder)
     
-    # Copy executable
-    exe_path = os.path.join('dist', exe_name)
-    if os.path.exists(exe_path):
-        shutil.copy(exe_path, dist_folder)
+    # Copy entire executable folder (not just exe file)
+    exe_folder = os.path.join('dist', 'FB_Recovery_Bot')
+    if os.path.exists(exe_folder):
+        print(f"   📂 Copying application folder...")
+        shutil.copytree(exe_folder, os.path.join(dist_folder, 'FB_Recovery_Bot'))
     else:
-        print(f"⚠️  Warning: {exe_path} not found, skipping copy")
+        print(f"⚠️  Warning: {exe_folder} not found, skipping copy")
     
     # Create README for Windows users
     readme_content = """
@@ -175,10 +193,15 @@ def create_distribution(exe_name='FB_Recovery_Bot.exe'):
 
 ## Quick Start
 
-1. **Double-click** `FB_Recovery_Bot.exe` to launch the bot
-2. Enter phone numbers (one per line)
-3. Configure settings if needed
-4. Click **START BOT**
+1. **Extract the entire folder** (don't move files separately)
+2. Navigate to `FB_Recovery_Bot` folder
+3. **Double-click** `FB_Recovery_Bot.exe` to launch the bot
+4. Enter phone numbers (one per line)
+5. Configure settings if needed
+6. Click **START BOT**
+
+**IMPORTANT**: Keep all files in the `FB_Recovery_Bot` folder together!
+Don't move just the .exe file - it needs the other files to run.
 
 ## System Requirements
 
@@ -246,6 +269,8 @@ On first launch, you'll see a license activation window:
 - Use 2-3 concurrent instances for best results
 - Enable headless mode for faster processing
 - Close other Chrome instances before starting
+- **Faster Startup**: This version uses folder structure (not single-file)
+  for instant startup without temp extraction
 
 ## Support
 

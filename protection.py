@@ -73,11 +73,28 @@ class ProtectionSystem:
     def check_debugger_processes(self):
         """Check for known debugger processes running"""
         try:
-            for proc in psutil.process_iter(['name']):
+            for proc in psutil.process_iter(['name', 'exe']):
                 try:
-                    proc_name = proc.info['name'].lower()
+                    # Check both process name and executable path
+                    proc_name = proc.info.get('name', '').lower()
+                    proc_exe = proc.info.get('exe', '').lower()
+                    
+                    # Check process name
                     if any(dbg.lower() in proc_name for dbg in self.DEBUGGER_PROCESSES):
                         return True
+                    
+                    # Check executable path (catches renamed debuggers)
+                    if proc_exe:
+                        for dbg in self.DEBUGGER_PROCESSES:
+                            if dbg.lower().replace('.exe', '') in proc_exe:
+                                return True
+                    
+                    # Special check for x64dbg variants
+                    if 'x64dbg' in proc_name or 'x32dbg' in proc_name or 'x96dbg' in proc_name:
+                        return True
+                    if proc_exe and ('x64dbg' in proc_exe or 'x32dbg' in proc_exe):
+                        return True
+                        
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
         except:
@@ -163,15 +180,25 @@ class ProtectionSystem:
         return True
     
     def silent_exit(self):
-        """Exit silently without any error message"""
+        """Exit immediately when debugging detected"""
         try:
-            # Close all file descriptors
-            sys.stdout = open(os.devnull, 'w')
-            sys.stderr = open(os.devnull, 'w')
+            # Show error message box on Windows
+            if platform.system() == 'Windows':
+                try:
+                    import ctypes
+                    ctypes.windll.user32.MessageBoxW(0, 
+                        "Security Error: Debugging tools detected.\nApplication cannot run in this environment.", 
+                        "Security Alert", 0x10)
+                except:
+                    pass
+            else:
+                # Linux/Mac: Print to stderr before exit
+                print("\n❌ Security Error: Debugging tools detected.", file=sys.stderr)
+                print("Application cannot run in this environment.\n", file=sys.stderr)
         except:
             pass
         
-        # Hard exit
+        # Force immediate exit
         os._exit(1)
     
     def continuous_check(self):
