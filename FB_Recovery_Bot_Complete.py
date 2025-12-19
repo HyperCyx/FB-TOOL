@@ -51,6 +51,8 @@ current_proxy_config = {
 
 success_numbers = []
 running = False
+bot_thread = None  # Track the main bot thread
+bot_start_lock = threading.Lock()  # Prevent simultaneous starts
 hidden_mode = False
 browser_windows = []
 local_proxy_thread = None
@@ -1686,11 +1688,16 @@ def realtime_stats_updater(stats, stats_labels, progress, total_numbers):
             pass  # Silently continue on errors
 
 def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_var, proxy_enabled_var=None, proxy_var=None, stop_btn=None, start_btn=None, ip_label=None):
-    global running, number_status
-    if running:
-        return
-    running = True
-    success_numbers.clear()
+    global running, number_status, bot_thread
+    
+    # Prevent multiple simultaneous starts
+    with bot_start_lock:
+        if running:
+            log_message(log_text, "⚠️ Bot is already running!\n")
+            return
+        
+        running = True
+        success_numbers.clear()
     
     # Clear number status tracking
     with number_status_lock:
@@ -1763,14 +1770,32 @@ def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_v
     # ========== NEW QUEUE-BASED SYSTEM ==========
     global number_queue, worker_threads, stats_updater_thread
     
-    # Clear queue and worker list
+    # Clear queue and worker list completely
+    log_message(log_text, f"🧹 Cleaning up previous session...\n")
+    queue_cleared = 0
     while not number_queue.empty():
         try:
             number_queue.get_nowait()
             number_queue.task_done()
+            queue_cleared += 1
         except:
             break
+    
+    if queue_cleared > 0:
+        log_message(log_text, f"🗑️ Cleared {queue_cleared} items from previous session\n")
+    
+    # Wait for any remaining worker threads
+    if worker_threads:
+        log_message(log_text, f"⏳ Waiting for {len(worker_threads)} old workers to finish...\n")
+        for worker in worker_threads:
+            try:
+                if worker.is_alive():
+                    worker.join(timeout=2)
+            except:
+                pass
+    
     worker_threads.clear()
+    log_message(log_text, f"✅ Previous session cleanup complete\n")
     
     log_message(log_text, f"📊 Queue-based system starting...\n")
     log_message(log_text, f"👷 Creating {concurrency} worker threads...\n")
@@ -1807,20 +1832,44 @@ def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_v
     log_message(log_text, f"⚡ Workers will automatically pull numbers from queue!\n")
     log_message(log_text, f"⚡ As soon as one finishes, it takes the next number!\n")
     
-    # Wait for queue to be empty (all numbers processed)
+    # Wait for queue to be empty (all numbers processed) - but exit immediately if stopped
     log_message(log_text, f"⏳ Waiting for all numbers to be processed...\n")
-    number_queue.join()
+    
+    # Monitor queue completion with running flag check
+    while running and not number_queue.empty():
+        try:
+            # Check every 0.5 seconds if we should stop
+            time.sleep(0.5)
+        except:
+            break
+    
+    # If stopped early, skip waiting for queue.join()
+    if running:
+        # Normal completion - wait for queue
+        try:
+            number_queue.join()
+        except:
+            pass
+    else:
+        # Stopped by user - exit immediately
+        log_message(log_text, f"🛑 Stopped by user - exiting immediately\n")
     
     # Send poison pills to stop workers
-    log_message(log_text, f"🛑 All numbers processed, stopping workers...\n")
+    if running:
+        log_message(log_text, f"🛑 All numbers processed, stopping workers...\n")
     for _ in range(concurrency):
-        number_queue.put(None)
+        try:
+            number_queue.put(None, timeout=0.1)
+        except:
+            pass
     
-    # Wait for all workers to finish
+    # Wait for all workers to finish (with timeout)
     for worker in worker_threads:
-        worker.join(timeout=5)
+        worker.join(timeout=2 if running else 0.5)
     
-    running = False
+    # Mark as not running only if we weren't already stopped
+    if running:
+        running = False
     log_message(log_text, f"\n✅ Done. Total success: {len(success_numbers)}\n")
     result_box.delete("1.0", "end")
     result_box.insert("1.0", "\n".join(success_numbers))
@@ -1838,11 +1887,18 @@ def run_bot(numbers, log_text, result_box, progress, stats_labels, concurrency_v
         start_btn.configure(state="normal")
 
 def stop_bot(log_text, stop_btn=None, start_btn=None):
-    global running, browser_windows, active_tabs, number_queue, worker_threads
+    global running, browser_windows, active_tabs, number_queue, worker_threads, bot_thread
     
     # Set running to False immediately
     running = False
     log_message(log_text, "🛑 EMERGENCY STOP - Terminating all operations...\n")
+    
+    # Wait for the main bot thread to finish (if it exists and is running)
+    if bot_thread and bot_thread.is_alive():
+        log_message(log_text, "⏳ Waiting for main bot thread to finish...\n")
+        bot_thread.join(timeout=3)  # Wait up to 3 seconds for graceful shutdown
+        if bot_thread.is_alive():
+            log_message(log_text, "⚠️ Main thread still running, forcing cleanup...\n")
     
     # Clear the queue with timeout
     cleared_count = 0
@@ -1866,6 +1922,18 @@ def stop_bot(log_text, stop_btn=None, start_btn=None):
         except:
             pass
     
+    # Wait for worker threads to finish (with short timeout for immediate stop)
+    log_message(log_text, f"⏳ Waiting for {len(worker_threads)} worker threads to finish...\n")
+    for worker in worker_threads:
+        try:
+            worker.join(timeout=1)  # Reduced from 3s to 1s for faster stop
+        except:
+            pass
+    
+    # Clear worker threads list
+    worker_threads.clear()
+    log_message(log_text, f"✅ All worker threads stopped\n")
+    
     closed_count = 0
     
     # Method 1: Close all tracked tabs from active_tabs (with timeout per tab)
@@ -1885,11 +1953,16 @@ def stop_bot(log_text, stop_btn=None, start_btn=None):
     # Close all tabs in parallel with timeout
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(force_close_driver, tab_info) for _, tab_info in tabs_to_close]
-        for future in concurrent.futures.as_completed(futures, timeout=5):
-            try:
-                closed_count += future.result(timeout=0.5)
-            except:
-                pass
+        try:
+            for future in concurrent.futures.as_completed(futures, timeout=5):
+                try:
+                    closed_count += future.result(timeout=0.5)
+                except:
+                    pass
+        except concurrent.futures.TimeoutError:
+            # Some browsers didn't close in time, but continue anyway
+            log_message(log_text, f"⚠️ Some browsers slow to close, forcing cleanup...\n")
+            pass
     
     # Clear active tabs
     with tab_lock:
@@ -1906,13 +1979,20 @@ def stop_bot(log_text, stop_btn=None, start_btn=None):
     
     browser_windows.clear()
     
+    # Clear all global state variables
+    success_numbers.clear()
+    with number_status_lock:
+        number_status.clear()
+    
     # Force garbage collection to free memory
     import gc
     gc.collect()
     
     log_message(log_text, f"✅ STOPPED! Force closed {closed_count} tabs/browsers.\n")
     log_message(log_text, f"✅ All operations terminated. Memory freed.\n")
+    log_message(log_text, f"✅ System ready for restart\n")
     
+    # Disable stop button and re-enable start button immediately
     if stop_btn:
         stop_btn.configure(state="disabled")
     if start_btn:
@@ -2043,14 +2123,19 @@ def main():
     buttons_frame.pack(fill="x", pady=(0, 15), padx=25)
 
     def validate_and_start():
+        global bot_thread
         numbers = input_box.get("1.0", "end-1c").strip()
         if not numbers:
             CTkMessagebox(title="⚠️ Input Required", message="Please enter phone numbers.", icon="warning", option_1="OK")
             return
-        threading.Thread(
+        
+        # Create and track the bot thread
+        bot_thread = threading.Thread(
             target=run_bot,
-            args=(numbers.splitlines(), log_text, result_box, progress, stats_labels, concurrency_var, proxy_enabled_var, proxy_var, stop_btn, start_btn, ip_status_label)
-        ).start()
+            args=(numbers.splitlines(), log_text, result_box, progress, stats_labels, concurrency_var, proxy_enabled_var, proxy_var, stop_btn, start_btn, ip_status_label),
+            daemon=False
+        )
+        bot_thread.start()
     
     start_btn = ctk.CTkButton(
         buttons_frame,
